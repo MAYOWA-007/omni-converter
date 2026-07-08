@@ -1,0 +1,55 @@
+{
+  "description": "Four 3840x2160 Roman clay and limewash material panels stacked as a vertical stage atlas.",
+  "atlas": {
+    "file": "omni-limewash-atlas-4k.webp",
+    "size": [
+      3840,
+      8640
+    ]
+  },
+  "runtimeAtlas": {
+    "file": "omni-limewash-atlas-2k.webp",
+    "size": [
+      1920,
+      4320
+    ]
+  },
+  "panels": [
+    {
+      "id": "oxblood",
+      "name": "Oxblood Roman clay",
+      "file": "omni-limewash-oxblood-4k.webp",
+      "size": [
+        3840,
+        2160
+      ]
+    },
+    {
+      "id": "limewash-cream",
+      "name": "Clouded limewash cream",
+      "file": "omni-limewash-limewash-cream-4k.webp",
+      "size": [
+        3840,
+        2160
+      ]
+    },
+    {
+      "id": "soot",
+      "name": "Soft soot black plaster",
+      "file": "omni-limewash-soot-4k.webp",
+      "size": [
+        3840,
+        2160
+      ]
+    },
+    {
+      "id": "emerald",
+      "name": "Forest emerald clay",
+      "file": "omni-limewash-emerald-4k.webp",
+      "size": [
+        3840,
+        2160
+      ]
+    }
+  ]
+}

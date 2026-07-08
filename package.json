@@ -1,0 +1,45 @@
+{
+  "name": "omni-converter",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "homepage": "https://mayowa-007.github.io/omni-converter/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MAYOWA-007/omni-converter.git"
+  },
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@vitejs/plugin-react": "^6.0.3",
+    "@zip.js/zip.js": "^2.8.26",
+    "fflate": "^0.8.3",
+    "file-type": "^22.0.1",
+    "lucide-react": "^0.561.0",
+    "mammoth": "^1.12.0",
+    "mediabunny": "^1.50.7",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.1.200",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "read-excel-file": "^9.2.0",
+    "tesseract.js": "^7.0.0",
+    "three": "^0.185.1",
+    "vite": "^8.1.3",
+    "wavesurfer.js": "^7.12.10"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.0",
+    "playwright": "^1.61.1",
+    "typescript": "~6.0.2"
+  }
+}
