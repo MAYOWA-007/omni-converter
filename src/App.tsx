@@ -92,11 +92,10 @@ export default function App() {
 function Topbar() {
   return (
     <nav className="topbar">
-      <a className="brand" href={import.meta.env.BASE_URL}>
-        <span className="brand-mark" aria-hidden="true">OC</span>
-        <span>Omni</span>
-        <b>Converter</b>
+      <a className="brand" href="https://www.knightaiav.com" aria-label="Knight AI+AV">
+        <img src={`${import.meta.env.BASE_URL}assets/media/knight-helm-gold-192.webp`} alt="" />
       </a>
+      <p className="topline-promise">Convert any file to any file.</p>
     </nav>
   );
 }
