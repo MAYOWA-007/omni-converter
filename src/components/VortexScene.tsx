@@ -11,11 +11,18 @@ interface Point3 {
   z: number;
 }
 
-interface Point2 {
-  x: number;
-  y: number;
-  z: number;
+interface Rotation {
+  cosX: number;
+  sinX: number;
+  cosY: number;
+  sinY: number;
+  cosZ: number;
+  sinZ: number;
 }
+
+const PRIMARY_PATHS = createWirePaths();
+const SECONDARY_PATHS = PRIMARY_PATHS.filter((_, index) => index % 2 === 0);
+const DOTS = createDots();
 
 export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -30,27 +37,47 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
     const canvasNode: HTMLCanvasElement = canvasElement;
     const ctx: CanvasRenderingContext2D = context;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+    const dpr = Math.min(window.devicePixelRatio || 1, window.innerWidth < 720 ? 1 : 1.2);
+    let width = 1;
+    let height = 1;
     let frame = 0;
-    let start = performance.now();
+    let lastFrame = 0;
+    let disposed = false;
+    const start = performance.now();
 
     function resize() {
-      const width = Math.max(1, canvasNode.clientWidth);
-      const height = Math.max(1, canvasNode.clientHeight);
-      const nextWidth = Math.floor(width * dpr);
-      const nextHeight = Math.floor(height * dpr);
-      if (canvasNode.width !== nextWidth || canvasNode.height !== nextHeight) {
-        canvasNode.width = nextWidth;
-        canvasNode.height = nextHeight;
+      const nextWidth = Math.max(1, canvasNode.clientWidth);
+      const nextHeight = Math.max(1, canvasNode.clientHeight);
+      const nextCanvasWidth = Math.floor(nextWidth * dpr);
+      const nextCanvasHeight = Math.floor(nextHeight * dpr);
+      width = nextWidth;
+      height = nextHeight;
+
+      if (canvasNode.width !== nextCanvasWidth || canvasNode.height !== nextCanvasHeight) {
+        canvasNode.width = nextCanvasWidth;
+        canvasNode.height = nextCanvasHeight;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      return { width, height };
+    }
+
+    function schedule() {
+      if (!disposed && !reducedMotion && !document.hidden) {
+        frame = requestAnimationFrame(render);
+      }
     }
 
     function render(now = performance.now()) {
-      const { width, height } = resize();
+      const targetFps = active ? 24 : 16;
+      const interval = 1000 / targetFps;
+
+      if (now - lastFrame < interval) {
+        schedule();
+        return;
+      }
+
+      lastFrame = now;
       const elapsed = (now - start) / 1000;
-      const energy = active ? 1.75 : fileLoaded ? 1.2 : 1;
+      const energy = active ? 1.65 : fileLoaded ? 1.15 : 1;
       const radius = Math.min(width, height) * (active ? 0.345 : 0.335);
       const centerX = width / 2;
       const centerY = height / 2;
@@ -58,35 +85,48 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
       ctx.clearRect(0, 0, width, height);
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.shadowBlur = active ? 10 : 4;
-      ctx.shadowColor = active ? "rgba(243, 220, 157, 0.26)" : "rgba(215, 183, 109, 0.18)";
+      ctx.shadowBlur = active ? 3 : 0;
+      ctx.shadowColor = "rgba(243, 220, 157, 0.18)";
 
-      const rotationY = elapsed * 0.34 * energy;
-      const rotationX = Math.sin(elapsed * 0.22) * 0.16;
-      const rotationZ = elapsed * 0.035;
+      const rotationY = elapsed * 0.3 * energy;
+      const rotationX = Math.sin(elapsed * 0.2) * 0.14;
+      const rotationZ = elapsed * 0.03;
 
-      drawSphere(ctx, centerX, centerY, radius, rotationX, rotationY, rotationZ, {
-        line: active ? "rgba(255, 236, 178, 0.82)" : "rgba(243, 220, 157, 0.66)",
-        point: active ? "rgba(255, 250, 240, 0.72)" : "rgba(255, 250, 240, 0.48)",
-        alpha: active ? 1 : 0.86
+      drawSphere(ctx, PRIMARY_PATHS, DOTS, centerX, centerY, radius, rotationX, rotationY, rotationZ, {
+        line: active ? "rgba(255, 236, 178, 0.82)" : "rgba(243, 220, 157, 0.64)",
+        point: active ? "rgba(255, 250, 240, 0.7)" : "rgba(255, 250, 240, 0.44)",
+        alpha: active ? 1 : 0.84
       });
 
-      drawSphere(ctx, centerX, centerY, radius * 0.72, -rotationX * 0.7, -rotationY * 0.8, -rotationZ, {
-        line: active ? "rgba(205, 108, 101, 0.42)" : "rgba(200, 106, 98, 0.28)",
-        point: "rgba(215, 183, 109, 0)",
-        alpha: 0.55
+      drawSphere(ctx, SECONDARY_PATHS, null, centerX, centerY, radius * 0.72, -rotationX * 0.7, -rotationY * 0.78, -rotationZ, {
+        line: active ? "rgba(205, 108, 101, 0.38)" : "rgba(200, 106, 98, 0.24)",
+        point: "transparent",
+        alpha: 0.5
       });
 
-      if (!reducedMotion) {
+      schedule();
+    }
+
+    function handleVisibility() {
+      if (!document.hidden && !disposed && !reducedMotion) {
+        lastFrame = 0;
         frame = requestAnimationFrame(render);
       }
     }
 
+    resize();
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    resizeObserver?.observe(canvasNode);
+    window.addEventListener("resize", resize, { passive: true });
+    document.addEventListener("visibilitychange", handleVisibility);
     render();
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(frame);
-      start = 0;
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", resize);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [active, fileLoaded]);
 
@@ -95,6 +135,8 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
 
 function drawSphere(
   context: CanvasRenderingContext2D,
+  paths: Point3[][],
+  dots: Point3[] | null,
   centerX: number,
   centerY: number,
   radius: number,
@@ -103,40 +145,56 @@ function drawSphere(
   rotationZ: number,
   paint: { line: string; point: string; alpha: number }
 ) {
+  const rotation = rotationValues(rotationX, rotationY, rotationZ);
   context.save();
   context.globalAlpha = paint.alpha;
   context.strokeStyle = paint.line;
-  context.lineWidth = Math.max(0.55, radius / 520);
+  context.lineWidth = Math.max(0.5, radius / 560);
 
-  for (let lat = -70; lat <= 70; lat += 10) {
+  for (let index = 0; index < paths.length; index += 1) {
+    drawPath(context, paths[index], centerX, centerY, radius, rotation);
+  }
+
+  if (dots) {
+    context.globalAlpha = 1;
+    context.fillStyle = paint.point;
+    for (let index = 0; index < dots.length; index += 1) {
+      drawDot(context, dots[index], centerX, centerY, radius, rotation);
+    }
+  }
+
+  context.restore();
+}
+
+function createWirePaths() {
+  const paths: Point3[][] = [];
+
+  for (let lat = -60; lat <= 60; lat += 15) {
     const theta = degrees(lat);
-    const path = sampleCurve((step) => {
+    paths.push(sampleCurve((step) => {
       const phi = step * Math.PI * 2;
       return {
         x: Math.cos(theta) * Math.cos(phi),
         y: Math.sin(theta),
         z: Math.cos(theta) * Math.sin(phi)
       };
-    });
-    drawPath(context, path, centerX, centerY, radius, rotationX, rotationY, rotationZ);
+    }));
   }
 
-  for (let lon = 0; lon < 180; lon += 10) {
+  for (let lon = 0; lon < 180; lon += 15) {
     const phi = degrees(lon);
-    const path = sampleCurve((step) => {
+    paths.push(sampleCurve((step) => {
       const theta = -Math.PI / 2 + step * Math.PI;
       return {
         x: Math.cos(theta) * Math.cos(phi),
         y: Math.sin(theta),
         z: Math.cos(theta) * Math.sin(phi)
       };
-    });
-    drawPath(context, path, centerX, centerY, radius, rotationX, rotationY, rotationZ);
+    }));
   }
 
-  context.globalAlpha = paint.alpha * 0.58;
-  for (let offset = 0; offset < Math.PI * 2; offset += Math.PI / 7) {
-    const path = sampleCurve((step) => {
+  for (let offset = 0; offset < Math.PI * 2; offset += Math.PI / 5) {
+    paths.push(sampleCurve((step) => {
       const theta = -Math.PI / 2 + step * Math.PI;
       const phi = offset + theta * 1.18;
       return {
@@ -144,95 +202,83 @@ function drawSphere(
         y: Math.sin(theta),
         z: Math.cos(theta) * Math.sin(phi)
       };
-    });
-    drawPath(context, path, centerX, centerY, radius, rotationX, rotationY, rotationZ);
+    }));
   }
 
-  if (paint.point !== "rgba(215, 183, 109, 0)") {
-    context.globalAlpha = 1;
-    context.fillStyle = paint.point;
-    for (let lat = -50; lat <= 50; lat += 20) {
-      for (let lon = 0; lon < 360; lon += 24) {
-        const theta = degrees(lat);
-        const phi = degrees(lon);
-        const point = project(
-          rotate(
-            {
-              x: Math.cos(theta) * Math.cos(phi),
-              y: Math.sin(theta),
-              z: Math.cos(theta) * Math.sin(phi)
-            },
-            rotationX,
-            rotationY,
-            rotationZ
-          ),
-          centerX,
-          centerY,
-          radius
-        );
-        const visible = 0.42 + (point.z + 1) * 0.24;
-        context.globalAlpha = Math.max(0.18, Math.min(0.72, visible));
-        context.beginPath();
-        context.arc(point.x, point.y, Math.max(0.8, radius / 310), 0, Math.PI * 2);
-        context.fill();
-      }
+  return paths;
+}
+
+function createDots() {
+  const dots: Point3[] = [];
+  for (let lat = -45; lat <= 45; lat += 22.5) {
+    for (let lon = 0; lon < 360; lon += 36) {
+      const theta = degrees(lat);
+      const phi = degrees(lon);
+      dots.push({
+        x: Math.cos(theta) * Math.cos(phi),
+        y: Math.sin(theta),
+        z: Math.cos(theta) * Math.sin(phi)
+      });
     }
   }
-
-  context.restore();
+  return dots;
 }
 
 function sampleCurve(getPoint: (step: number) => Point3) {
   const points: Point3[] = [];
-  for (let index = 0; index <= 96; index += 1) {
-    points.push(getPoint(index / 96));
+  const samples = 48;
+  for (let index = 0; index <= samples; index += 1) {
+    points.push(getPoint(index / samples));
   }
   return points;
 }
 
-function drawPath(
-  context: CanvasRenderingContext2D,
-  points: Point3[],
-  centerX: number,
-  centerY: number,
-  radius: number,
-  rotationX: number,
-  rotationY: number,
-  rotationZ: number
-) {
+function drawPath(context: CanvasRenderingContext2D, points: Point3[], centerX: number, centerY: number, radius: number, rotation: Rotation) {
   context.beginPath();
-  points.forEach((point, index) => {
-    const projected = project(rotate(point, rotationX, rotationY, rotationZ), centerX, centerY, radius);
-    if (index === 0) context.moveTo(projected.x, projected.y);
-    else context.lineTo(projected.x, projected.y);
-  });
+
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    const y1 = point.y * rotation.cosX - point.z * rotation.sinX;
+    const z1 = point.y * rotation.sinX + point.z * rotation.cosX;
+    const x2 = point.x * rotation.cosY + z1 * rotation.sinY;
+    const z2 = -point.x * rotation.sinY + z1 * rotation.cosY;
+    const x3 = x2 * rotation.cosZ - y1 * rotation.sinZ;
+    const y3 = x2 * rotation.sinZ + y1 * rotation.cosZ;
+    const depth = 1 + z2 * 0.06;
+    const x = centerX + x3 * radius * depth;
+    const y = centerY + y3 * radius * depth;
+
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  }
+
   context.stroke();
 }
 
-function rotate(point: Point3, rotationX: number, rotationY: number, rotationZ: number): Point3 {
-  const cosX = Math.cos(rotationX);
-  const sinX = Math.sin(rotationX);
-  const cosY = Math.cos(rotationY);
-  const sinY = Math.sin(rotationY);
-  const cosZ = Math.cos(rotationZ);
-  const sinZ = Math.sin(rotationZ);
+function drawDot(context: CanvasRenderingContext2D, point: Point3, centerX: number, centerY: number, radius: number, rotation: Rotation) {
+  const y1 = point.y * rotation.cosX - point.z * rotation.sinX;
+  const z1 = point.y * rotation.sinX + point.z * rotation.cosX;
+  const x2 = point.x * rotation.cosY + z1 * rotation.sinY;
+  const z2 = -point.x * rotation.sinY + z1 * rotation.cosY;
+  const x3 = x2 * rotation.cosZ - y1 * rotation.sinZ;
+  const y3 = x2 * rotation.sinZ + y1 * rotation.cosZ;
+  const depth = 1 + z2 * 0.06;
+  const visible = 0.42 + (z2 + 1) * 0.24;
 
-  const y1 = point.y * cosX - point.z * sinX;
-  const z1 = point.y * sinX + point.z * cosX;
-  const x2 = point.x * cosY + z1 * sinY;
-  const z2 = -point.x * sinY + z1 * cosY;
-  const x3 = x2 * cosZ - y1 * sinZ;
-  const y3 = x2 * sinZ + y1 * cosZ;
-
-  return { x: x3, y: y3, z: z2 };
+  context.globalAlpha = Math.max(0.18, Math.min(0.7, visible));
+  context.beginPath();
+  context.arc(centerX + x3 * radius * depth, centerY + y3 * radius * depth, Math.max(0.7, radius / 330), 0, Math.PI * 2);
+  context.fill();
 }
 
-function project(point: Point3, centerX: number, centerY: number, radius: number): Point2 {
-  const depth = 1 + point.z * 0.06;
+function rotationValues(rotationX: number, rotationY: number, rotationZ: number): Rotation {
   return {
-    x: centerX + point.x * radius * depth,
-    y: centerY + point.y * radius * depth,
-    z: point.z
+    cosX: Math.cos(rotationX),
+    sinX: Math.sin(rotationX),
+    cosY: Math.cos(rotationY),
+    sinY: Math.sin(rotationY),
+    cosZ: Math.cos(rotationZ),
+    sinZ: Math.sin(rotationZ)
   };
 }
 

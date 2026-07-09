@@ -1,5 +1,5 @@
 import { Upload } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 const VortexScene = lazy(() => import("./VortexScene").then((module) => ({ default: module.VortexScene })));
 
@@ -12,6 +12,49 @@ interface DropVortexProps {
 
 export function DropVortex({ active, fileLoaded, onFile, onDragActive }: DropVortexProps) {
   const [hovered, setHovered] = useState(false);
+  const [showVortex, setShowVortex] = useState(false);
+
+  useEffect(() => {
+    const idleWindow = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
+    let cancelled = false;
+    let delayId = 0;
+    let timeoutId = 0;
+    let idleId = 0;
+
+    const loadVortex = () => {
+      timeoutId = window.setTimeout(() => {
+        if (!cancelled) setShowVortex(true);
+      }, 120);
+    };
+
+    delayId = window.setTimeout(() => {
+      if (cancelled) return;
+      if (idleWindow.requestIdleCallback) {
+        idleId = idleWindow.requestIdleCallback(loadVortex, { timeout: 1600 });
+      } else {
+        idleId = idleWindow.setTimeout(loadVortex, 0);
+      }
+    }, 2800);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(delayId);
+      if (idleWindow.cancelIdleCallback) {
+        idleWindow.cancelIdleCallback(idleId);
+      } else {
+        idleWindow.clearTimeout(idleId);
+      }
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (active || hovered) setShowVortex(true);
+  }, [active, hovered]);
 
   function handleFiles(files: FileList | null) {
     const file = files?.[0];
@@ -38,9 +81,13 @@ export function DropVortex({ active, fileLoaded, onFile, onDragActive }: DropVor
         handleFiles(event.dataTransfer.files);
       }}
     >
-      <Suspense fallback={<div className="vortex-canvas vortex-fallback" aria-hidden="true" />}>
-        <VortexScene active={active || hovered} fileLoaded={fileLoaded} />
-      </Suspense>
+      {showVortex ? (
+        <Suspense fallback={<div className="vortex-canvas vortex-fallback" aria-hidden="true" />}>
+          <VortexScene active={active || hovered} fileLoaded={fileLoaded} />
+        </Suspense>
+      ) : (
+        <div className="vortex-canvas vortex-fallback" aria-hidden="true" />
+      )}
       <label
         className="drop-core"
         onMouseEnter={() => setHovered(true)}

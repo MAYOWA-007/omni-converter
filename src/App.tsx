@@ -2,13 +2,44 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, FileType2, Search, Sparkles } from "lucide-react";
 import { DropVortex } from "./components/DropVortex";
 import { RecipeCard } from "./components/RecipeCard";
-import { DEFAULT_CONTROL_OPTIONS, filterRecipesByQuery, recipeCategories, recipeOutputs, recipesForFamily } from "./data/conversionMatrix";
 import { formatBytes, formatDuration, inspectFile } from "./lib/fileInspection";
-import { canRunRecipe, convertRecipe, downloadOutput } from "./lib/conversions";
 import { getDeviceProfile, preflightRecipe } from "./lib/preflight";
 import type { ConversionRecipe, ConversionSettings, DeviceProfile, EditorControl, FileInspection, PreflightResult } from "./lib/types";
 
 type Stage = "drop" | "analyzing" | "choose" | "edit";
+type ConversionCatalog = typeof import("./data/conversionMatrix");
+
+let catalogPromise: Promise<ConversionCatalog> | null = null;
+
+function loadConversionCatalog() {
+  catalogPromise ??= import("./data/conversionMatrix");
+  return catalogPromise;
+}
+
+const DEFAULT_CONTROL_OPTIONS: Record<EditorControl, string[]> = {
+  outputFormat: ["Auto", "PNG", "JPEG", "WebP", "AVIF", "PDF", "TXT", "Markdown", "HTML", "ZIP"],
+  timeline: ["Full file", "Marked range", "Current clip", "Intro only", "Outro only", "Custom marks"],
+  trim: ["None", "Start/end handles", "First 5 seconds", "First 15 seconds", "First 30 seconds", "Custom range"],
+  crop: ["None", "Fit entire source", "Fill target", "Center crop", "Trim transparent edges", "Safe social crop", "Custom crop"],
+  aspectRatio: ["Original", "1:1 square", "4:5 portrait", "16:9 widescreen", "9:16 vertical", "A4 page", "Letter page", "Custom"],
+  resolution: ["Original", "512 px", "1024 px", "1080 px", "1920 px", "2K", "4K", "150 DPI", "300 DPI", "Custom"],
+  frameRate: ["Source", "12 fps", "24 fps", "30 fps", "60 fps", "Custom"],
+  frameInterval: ["Every frame", "Every 1 second", "Every 2 seconds", "Every 5 seconds", "Every 10 seconds", "Scene changes", "Custom interval"],
+  chapterInterval: ["None", "Every minute", "Every 2 minutes", "Every 5 minutes", "Detected chapters", "Custom chapter marks"],
+  audioGain: ["Keep source", "Normalize", "-6 dB", "-3 dB", "+3 dB", "+6 dB", "Mute", "Custom"],
+  audioFade: ["None", "Fade in", "Fade out", "Fade in and out", "Crossfade clips", "Custom"],
+  waveform: ["None", "PNG waveform", "SVG waveform", "Audiogram background", "Timeline peaks JSON"],
+  captions: ["None", "Import SRT", "Import VTT", "Export SRT", "Export VTT", "Burn in later", "Transcript package"],
+  color: ["Original", "sRGB", "Display P3", "Grayscale", "Transparent matte", "White matte", "Black matte"],
+  compression: ["Lossless", "Maximum quality", "High quality", "Balanced", "Small file", "Tiny preview", "Custom"],
+  pageOrder: ["All pages", "Current page", "First page", "Last page", "Odd pages", "Even pages", "Custom range", "Split every page"],
+  pageSize: ["Auto", "Original", "Letter", "Legal", "A4", "A5", "16:9 slide", "4:5 carousel", "1:1 square", "Custom"],
+  margins: ["None", "Narrow", "Standard", "Wide", "Bleed", "Safe area", "Custom"],
+  metadata: ["Keep", "Strip", "Inspect report", "Normalize", "Rename title", "Redact hidden fields"],
+  watermark: ["None", "Text watermark", "Image watermark", "Page number", "Date stamp", "Custom"],
+  batchNaming: ["Keep source name", "Clean filename", "Numbered sequence", "Page number suffix", "Size suffix", "Date suffix", "Custom pattern"],
+  bundle: ["Single file", "ZIP", "ZIP with manifest", "ZIP with README", "Folder by page", "Folder by format", "Checksum manifest"]
+};
 
 export default function App() {
   const [stage, setStage] = useState<Stage>("drop");
@@ -17,21 +48,20 @@ export default function App() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [device, setDevice] = useState<DeviceProfile | null>(null);
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
-
-  useEffect(() => {
-    void getDeviceProfile().then(setDevice);
-  }, []);
+  const [catalog, setCatalog] = useState<ConversionCatalog | null>(null);
 
   async function handleFile(file: File) {
     setStage("analyzing");
     setSourceFile(file);
     setSelectedRecipeId(null);
-    const nextInspection = await inspectFile(file);
+    const [nextInspection, nextCatalog, nextDevice] = await Promise.all([inspectFile(file), loadConversionCatalog(), getDeviceProfile()]);
+    setCatalog(nextCatalog);
     setInspection(nextInspection);
+    setDevice(nextDevice);
     window.setTimeout(() => setStage("choose"), 920);
   }
 
-  const recipes = useMemo(() => (inspection ? recipesForFamily(inspection.family) : []), [inspection]);
+  const recipes = useMemo(() => (inspection && catalog ? catalog.recipesForFamily(inspection.family) : []), [catalog, inspection]);
   const preflights = useMemo(() => {
     const map = new Map<string, PreflightResult>();
     if (!inspection || !device) return map;
@@ -51,6 +81,7 @@ export default function App() {
       throw new Error("Choose a file first.");
     }
 
+    const { convertRecipe, downloadOutput } = await import("./lib/conversions");
     const outputs = await convertRecipe(sourceFile, inspection, recipe, settings);
     outputs.forEach(downloadOutput);
     return outputs.length;
@@ -66,8 +97,8 @@ export default function App() {
 
       {stage === "analyzing" && inspection ? <AnalyzeScreen inspection={inspection} /> : null}
 
-      {stage === "choose" && inspection ? (
-        <ChooseScreen inspection={inspection} recipes={recipes} preflights={preflights} onSelect={selectRecipe} onBack={() => setStage("drop")} />
+      {stage === "choose" && inspection && catalog ? (
+        <ChooseScreen catalog={catalog} inspection={inspection} recipes={recipes} preflights={preflights} onSelect={selectRecipe} onBack={() => setStage("drop")} />
       ) : null}
 
       {stage === "edit" && inspection && selectedRecipe ? (
@@ -93,9 +124,8 @@ function Topbar() {
   return (
     <nav className="topbar">
       <a className="brand" href={import.meta.env.BASE_URL} aria-label="Omni Converter">
-        <img src={`${import.meta.env.BASE_URL}android-chrome-192x192.png`} alt="" />
+        <img src={`${import.meta.env.BASE_URL}favicon-48x48.png`} alt="" />
       </a>
-      <p className="topline-promise">Convert any file to any file.</p>
     </nav>
   );
 }
@@ -122,12 +152,14 @@ function AnalyzeScreen({ inspection }: { inspection: FileInspection }) {
 }
 
 function ChooseScreen({
+  catalog,
   inspection,
   recipes,
   preflights,
   onSelect,
   onBack
 }: {
+  catalog: ConversionCatalog;
   inspection: FileInspection;
   recipes: ConversionRecipe[];
   preflights: Map<string, PreflightResult>;
@@ -137,15 +169,15 @@ function ChooseScreen({
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [output, setOutput] = useState("all");
-  const categories = useMemo(() => recipeCategories(recipes), [recipes]);
-  const outputs = useMemo(() => recipeOutputs(recipes), [recipes]);
+  const categories = useMemo(() => catalog.recipeCategories(recipes), [catalog, recipes]);
+  const outputs = useMemo(() => catalog.recipeOutputs(recipes), [catalog, recipes]);
   const visibleRecipes = useMemo(() => {
-    return filterRecipesByQuery(recipes, query).filter((recipe) => {
+    return catalog.filterRecipesByQuery(recipes, query).filter((recipe) => {
       const categoryMatch = category === "all" || recipe.category === category;
       const outputMatch = output === "all" || recipe.output === output;
       return categoryMatch && outputMatch;
     });
-  }, [category, output, query, recipes]);
+  }, [catalog, category, output, query, recipes]);
   const countLabel = query.trim() ? `${visibleRecipes.length} of ${recipes.length} conversions` : `${recipes.length} available conversions`;
 
   return (
@@ -212,7 +244,7 @@ function EditScreen({
   onBack: () => void;
   onRestart: () => void;
 }) {
-  const runnable = canRunRecipe(recipe);
+  const runnable = recipe.implementation === "ready";
   const unavailable = preflight?.status === "blocked" || !runnable;
   const [status, setStatus] = useState<"idle" | "working" | "done" | "error">("idle");
   const [message, setMessage] = useState("");
