@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, FileType2, Search, Sparkles } from "lucide-react";
 import { DropVortex } from "./components/DropVortex";
 import { RecipeCard } from "./components/RecipeCard";
-import { filterRecipesByQuery, recipesForFamily } from "./data/conversionMatrix";
+import { DEFAULT_CONTROL_OPTIONS, filterRecipesByQuery, recipeCategories, recipeOutputs, recipesForFamily } from "./data/conversionMatrix";
 import { formatBytes, formatDuration, inspectFile } from "./lib/fileInspection";
-import { convertImageRecipe, downloadOutput } from "./lib/imageConversions";
+import { canRunRecipe, convertRecipe, downloadOutput } from "./lib/conversions";
 import { getDeviceProfile, preflightRecipe } from "./lib/preflight";
-import type { ConversionRecipe, DeviceProfile, FileInspection, PreflightResult } from "./lib/types";
+import type { ConversionRecipe, ConversionSettings, DeviceProfile, EditorControl, FileInspection, PreflightResult } from "./lib/types";
 
 type Stage = "drop" | "analyzing" | "choose" | "edit";
 
@@ -46,12 +46,12 @@ export default function App() {
     setStage("edit");
   }
 
-  async function runConversion(recipe: ConversionRecipe) {
+  async function runConversion(recipe: ConversionRecipe, settings: ConversionSettings) {
     if (!sourceFile || !inspection) {
       throw new Error("Choose a file first.");
     }
 
-    const outputs = await convertImageRecipe(sourceFile, inspection, recipe);
+    const outputs = await convertRecipe(sourceFile, inspection, recipe, settings);
     outputs.forEach(downloadOutput);
     return outputs.length;
   }
@@ -92,8 +92,8 @@ export default function App() {
 function Topbar() {
   return (
     <nav className="topbar">
-      <a className="brand" href="https://www.knightaiav.com" aria-label="Knight AI+AV">
-        <img src={`${import.meta.env.BASE_URL}assets/media/knight-helm-gold-192.webp`} alt="" />
+      <a className="brand" href={import.meta.env.BASE_URL} aria-label="Omni Converter">
+        <img src={`${import.meta.env.BASE_URL}android-chrome-192x192.png`} alt="" />
       </a>
       <p className="topline-promise">Convert any file to any file.</p>
     </nav>
@@ -135,7 +135,17 @@ function ChooseScreen({
   onBack: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const visibleRecipes = useMemo(() => filterRecipesByQuery(recipes, query), [query, recipes]);
+  const [category, setCategory] = useState("all");
+  const [output, setOutput] = useState("all");
+  const categories = useMemo(() => recipeCategories(recipes), [recipes]);
+  const outputs = useMemo(() => recipeOutputs(recipes), [recipes]);
+  const visibleRecipes = useMemo(() => {
+    return filterRecipesByQuery(recipes, query).filter((recipe) => {
+      const categoryMatch = category === "all" || recipe.category === category;
+      const outputMatch = output === "all" || recipe.output === output;
+      return categoryMatch && outputMatch;
+    });
+  }, [category, output, query, recipes]);
   const countLabel = query.trim() ? `${visibleRecipes.length} of ${recipes.length} conversions` : `${recipes.length} available conversions`;
 
   return (
@@ -153,6 +163,30 @@ function ChooseScreen({
         <Search size={15} />
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversions: jpg, web, icon, pdf, embed..." />
       </label>
+      <div className="conversion-filters" aria-label="Conversion filters">
+        <label>
+          <span>Category</span>
+          <select value={category} onChange={(event) => setCategory(event.target.value)}>
+            <option value="all">All categories</option>
+            {categories.map((item) => (
+              <option value={item} key={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Output</span>
+          <select value={output} onChange={(event) => setOutput(event.target.value)}>
+            <option value="all">All outputs</option>
+            {outputs.map((item) => (
+              <option value={item} key={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       <div className="recipe-stage-grid">
         {visibleRecipes.map((recipe) => (
           <RecipeCard key={recipe.id} recipe={recipe} preflight={preflights.get(recipe.id) ?? null} selected={false} onSelect={() => onSelect(recipe)} />
@@ -174,21 +208,29 @@ function EditScreen({
   inspection: FileInspection;
   recipe: ConversionRecipe;
   preflight: PreflightResult | null;
-  onConvert: (recipe: ConversionRecipe) => Promise<number>;
+  onConvert: (recipe: ConversionRecipe, settings: ConversionSettings) => Promise<number>;
   onBack: () => void;
   onRestart: () => void;
 }) {
-  const unavailable = preflight?.status === "blocked";
+  const runnable = canRunRecipe(recipe);
+  const unavailable = preflight?.status === "blocked" || !runnable;
   const [status, setStatus] = useState<"idle" | "working" | "done" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [settings, setSettings] = useState<ConversionSettings>(() => initialSettingsForRecipe(recipe));
   const working = status === "working";
+
+  useEffect(() => {
+    setSettings(initialSettingsForRecipe(recipe));
+    setStatus("idle");
+    setMessage("");
+  }, [recipe]);
 
   async function handleConvert() {
     setStatus("working");
     setMessage("");
 
     try {
-      const outputCount = await onConvert(recipe);
+      const outputCount = await onConvert(recipe, settings);
       setStatus("done");
       setMessage(outputCount === 1 ? "Download created." : `${outputCount} downloads created.`);
     } catch (error) {
@@ -206,21 +248,30 @@ function EditScreen({
       <FileHeader inspection={inspection} />
       <div className="edit-layout">
         <div className="stage-copy">
-          <span>{recipe.output}</span>
+          <span>
+            {recipe.category} / {recipe.output}
+          </span>
           <h1>{recipe.title}</h1>
           <p>{recipe.description}</p>
         </div>
         <div className="control-surface">
           <div className="control-list">
-            {recipe.editorControls.slice(0, 8).map((control) => (
+            {recipe.editorControls.map((control) => (
               <label className="control-row" key={control}>
                 <span>{controlLabel(control)}</span>
-                <input placeholder={controlPlaceholder(control)} />
+                <select value={settings[control] ?? getControlOptions(recipe, control)[0] ?? "Auto"} onChange={(event) => setSettings((current) => ({ ...current, [control]: event.target.value }))}>
+                  {getControlOptions(recipe, control).map((option) => (
+                    <option value={option} key={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </label>
             ))}
           </div>
           {preflight?.status === "slow" ? <p className="device-note">This conversion may take a while.</p> : null}
-          {unavailable ? <p className="device-note bad">This option is not available for this file.</p> : null}
+          {preflight?.status === "blocked" ? <p className="device-note bad">{preflight.reasons[0] ?? "This option is not available for this file."}</p> : null}
+          {!runnable && preflight?.status !== "blocked" ? <p className="device-note bad">This converter is not available yet.</p> : null}
           {message ? <p className={`device-note ${status === "error" ? "bad" : ""}`}>{message}</p> : null}
           <div className="edit-actions">
             <button className="primary-action" disabled={unavailable || working} type="button" onClick={handleConvert}>
@@ -253,9 +304,18 @@ function FileHeader({ inspection }: { inspection: FileInspection }) {
   );
 }
 
+function initialSettingsForRecipe(recipe: ConversionRecipe): ConversionSettings {
+  return Object.fromEntries(recipe.editorControls.map((control) => [control, getControlOptions(recipe, control)[0] ?? "Auto"])) as ConversionSettings;
+}
+
+function getControlOptions(recipe: ConversionRecipe, control: EditorControl) {
+  return recipe.controlOptions?.[control] ?? DEFAULT_CONTROL_OPTIONS[control] ?? ["Auto"];
+}
+
 function controlLabel(control: string) {
   return (
     {
+      outputFormat: "Output",
       timeline: "Timeline",
       trim: "Trim",
       crop: "Crop",
@@ -278,33 +338,5 @@ function controlLabel(control: string) {
       batchNaming: "Names",
       bundle: "Bundle"
     }[control] ?? control
-  );
-}
-
-function controlPlaceholder(control: string) {
-  return (
-    {
-      timeline: "Full length",
-      trim: "Start / end",
-      crop: "None",
-      aspectRatio: "Original",
-      resolution: "Original",
-      frameRate: "Auto",
-      frameInterval: "Every 1 sec",
-      chapterInterval: "Auto",
-      audioGain: "100%",
-      audioFade: "None",
-      waveform: "Auto",
-      captions: "None",
-      color: "Original",
-      compression: "Balanced",
-      pageOrder: "All",
-      pageSize: "Auto",
-      margins: "Default",
-      metadata: "Keep",
-      watermark: "None",
-      batchNaming: "Auto",
-      bundle: "ZIP"
-    }[control] ?? "Auto"
   );
 }

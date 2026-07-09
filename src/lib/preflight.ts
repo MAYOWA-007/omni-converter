@@ -45,6 +45,15 @@ export function preflightRecipe(recipe: ConversionRecipe, inspection: FileInspec
   const missing = recipe.requiredCapabilities.filter((capability) => !device.supports[capability]);
   const availableStorage = device.storageQuota && device.storageUsage ? device.storageQuota - device.storageUsage : undefined;
 
+  if (recipe.implementation === "planned") {
+    return {
+      status: "blocked",
+      label: "Queued",
+      estimate: "Not available yet",
+      reasons: ["This exact converter is in the build queue."]
+    };
+  }
+
   if (missing.length) {
     reasons.push(`This browser is missing: ${missing.join(", ")}.`);
   }

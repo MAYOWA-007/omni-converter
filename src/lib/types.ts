@@ -37,6 +37,7 @@ export type Capability =
 export type Intensity = "light" | "standard" | "heavy" | "extreme";
 
 export type EditorControl =
+  | "outputFormat"
   | "timeline"
   | "trim"
   | "crop"
@@ -59,18 +60,25 @@ export type EditorControl =
   | "batchNaming"
   | "bundle";
 
+export type ConversionImplementation = "ready" | "planned";
+
+export type ConversionSettings = Partial<Record<EditorControl, string>>;
+
 export interface ConversionRecipe {
   id: string;
   input: FileFamily[];
+  category: string;
   output: string;
   title: string;
   description: string;
   treatments: string[];
   keywords?: string[];
   editorControls: EditorControl[];
+  controlOptions?: Partial<Record<EditorControl, string[]>>;
   requiredCapabilities: Capability[];
   intensity: Intensity;
   engine: string;
+  implementation: ConversionImplementation;
   localOnly: true;
 }
 
