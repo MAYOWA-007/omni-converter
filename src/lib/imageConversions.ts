@@ -1,4 +1,5 @@
-import type { ConversionRecipe, FileInspection } from "./types";
+import { qualityFromCompression } from "./conversionHelpers";
+import type { ConversionRecipe, ConversionSettings, FileInspection } from "./types";
 
 export interface ConversionOutput {
   name: string;
@@ -25,7 +26,7 @@ export function canConvertImageRecipe(recipe: ConversionRecipe) {
   return recipe.input.includes("image") && IMAGE_RECIPE_IDS.has(recipe.id);
 }
 
-export async function convertImageRecipe(file: File, inspection: FileInspection, recipe: ConversionRecipe): Promise<ConversionOutput[]> {
+export async function convertImageRecipe(file: File, inspection: FileInspection, recipe: ConversionRecipe, settings: ConversionSettings = {}): Promise<ConversionOutput[]> {
   if (!canConvertImageRecipe(recipe)) {
     throw new Error("This output is not wired to the image converter yet.");
   }
@@ -34,17 +35,17 @@ export async function convertImageRecipe(file: File, inspection: FileInspection,
 
   switch (recipe.id) {
     case "image-to-pdf":
-      return [await createPdf(file, inspection, baseName, "image")];
+      return [await createPdf(file, inspection, baseName, "image", settings)];
     case "image-print-pdf":
-      return [await createPdf(file, inspection, baseName, "letter")];
+      return [await createPdf(file, inspection, baseName, "letter", settings)];
     case "image-to-png":
       return [await convertCanvasFormat(file, `${baseName}.png`, "image/png")];
     case "image-to-jpeg":
-      return [await convertCanvasFormat(file, `${baseName}.jpg`, "image/jpeg", 0.9, "#ffffff")];
+      return [await convertCanvasFormat(file, `${baseName}.jpg`, "image/jpeg", qualityFromCompression(settings.compression), "#ffffff")];
     case "image-to-webp":
-      return [await convertCanvasFormat(file, `${baseName}.webp`, "image/webp", 0.86)];
+      return [await convertCanvasFormat(file, `${baseName}.webp`, "image/webp", qualityFromCompression(settings.compression))];
     case "image-to-avif":
-      return [await convertCanvasFormat(file, `${baseName}.avif`, "image/avif", 0.82)];
+      return [await convertCanvasFormat(file, `${baseName}.avif`, "image/avif", qualityFromCompression(settings.compression))];
     case "image-to-bmp":
       return [await convertBmp(file, `${baseName}.bmp`)];
     case "image-svg-wrapper":
@@ -54,11 +55,11 @@ export async function convertImageRecipe(file: File, inspection: FileInspection,
     case "image-html-embed":
       return [await createHtmlEmbed(file, inspection, `${baseName}.html`)];
     case "image-thumbnail-set":
-      return [await createThumbnailZip(file, baseName)];
+      return [await createThumbnailZip(file, baseName, settings)];
     case "image-favicon-set":
       return [await createFaviconZip(file, baseName)];
     case "image-format-bundle":
-      return [await createFormatBundle(file, baseName)];
+      return [await createFormatBundle(file, baseName, settings)];
     default:
       throw new Error("This image output is not available.");
   }
@@ -81,10 +82,10 @@ async function convertCanvasFormat(file: File, name: string, type: string, quali
   return { name, blob };
 }
 
-async function createPdf(file: File, inspection: FileInspection, baseName: string, mode: "image" | "letter"): Promise<ConversionOutput> {
+async function createPdf(file: File, inspection: FileInspection, baseName: string, mode: "image" | "letter", settings: ConversionSettings): Promise<ConversionOutput> {
   const { PDFDocument } = await import("pdf-lib");
   const canvas = await renderImage(file, { background: "#ffffff" });
-  const jpeg = await canvasToBlob(canvas, "image/jpeg", 0.92);
+  const jpeg = await canvasToBlob(canvas, "image/jpeg", qualityFromCompression(settings.compression));
   const imageBytes = await jpeg.arrayBuffer();
   const pdf = await PDFDocument.create();
   const image = await pdf.embedJpg(imageBytes);
@@ -160,13 +161,13 @@ async function createSvgWrapper(file: File, inspection: FileInspection, name: st
   return { name, blob: new Blob([svg], { type: "image/svg+xml;charset=utf-8" }) };
 }
 
-async function createThumbnailZip(file: File, baseName: string): Promise<ConversionOutput> {
+async function createThumbnailZip(file: File, baseName: string, settings: ConversionSettings): Promise<ConversionOutput> {
   const widths = [320, 640, 1080, 1920];
   const outputs: ConversionOutput[] = [];
 
   for (const width of widths) {
     const canvas = await renderImage(file, { width });
-    const blob = await canvasToBlob(canvas, "image/webp", 0.84);
+    const blob = await canvasToBlob(canvas, "image/webp", qualityFromCompression(settings.compression));
     outputs.push({ name: `thumbnails/${baseName}-${width}w.webp`, blob });
   }
 
@@ -208,10 +209,10 @@ async function createFaviconZip(file: File, baseName: string): Promise<Conversio
   return zipOutputs(`${baseName}-favicon-set.zip`, outputs);
 }
 
-async function createFormatBundle(file: File, baseName: string): Promise<ConversionOutput> {
+async function createFormatBundle(file: File, baseName: string, settings: ConversionSettings): Promise<ConversionOutput> {
   const png = await convertCanvasFormat(file, `formats/${baseName}.png`, "image/png");
-  const jpeg = await convertCanvasFormat(file, `formats/${baseName}.jpg`, "image/jpeg", 0.9, "#ffffff");
-  const webp = await convertCanvasFormat(file, `formats/${baseName}.webp`, "image/webp", 0.86);
+  const jpeg = await convertCanvasFormat(file, `formats/${baseName}.jpg`, "image/jpeg", qualityFromCompression(settings.compression), "#ffffff");
+  const webp = await convertCanvasFormat(file, `formats/${baseName}.webp`, "image/webp", qualityFromCompression(settings.compression));
 
   const manifest = {
     source: file.name,
@@ -243,7 +244,7 @@ async function zipOutputs(name: string, outputs: ConversionOutput[]): Promise<Co
 
   return {
     name,
-    blob: new Blob([toArrayBuffer(zipSync(files, { level: 6 }))], { type: "application/zip" })
+    blob: new Blob([toArrayBuffer(zipSync(files, { level: 9 }))], { type: "application/zip" })
   };
 }
 

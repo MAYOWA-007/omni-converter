@@ -210,7 +210,7 @@ async function zipOutputs(name: string, outputs: ConversionOutput[]): Promise<Co
 
   return {
     name,
-    blob: new Blob([toArrayBuffer(zipSync(files, { level: 6 }))], { type: "application/zip" })
+    blob: new Blob([toArrayBuffer(zipSync(files, { level: 9 }))], { type: "application/zip" })
   };
 }
 
@@ -226,11 +226,12 @@ function scaleFromResolution(value?: string) {
 }
 
 function qualityFromCompression(value?: string) {
-  if (!value) return 0.88;
-  if (value.includes("Maximum")) return 0.96;
-  if (value.includes("High")) return 0.9;
-  if (value.includes("Small")) return 0.72;
-  return 0.84;
+  if (!value) return 0.9;
+  if (/lossless|maximum/i.test(value)) return 0.98;
+  if (/high/i.test(value)) return 0.92;
+  if (/small/i.test(value)) return 0.72;
+  if (/tiny/i.test(value)) return 0.56;
+  return 0.86;
 }
 
 function baseFileName(name: string) {

@@ -59,7 +59,7 @@ type RecipeInput = Omit<ConversionRecipe, "implementation" | "localOnly"> & Part
 
 function recipe(config: RecipeInput): ConversionRecipe {
   return {
-    implementation: "planned",
+    implementation: "ready",
     localOnly: true,
     ...config
   };
