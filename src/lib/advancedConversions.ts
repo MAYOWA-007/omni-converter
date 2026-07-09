@@ -15,6 +15,7 @@ import {
   rowsToObjects,
   stringifyYaml,
   toArrayBuffer,
+  zipLevelFromCompression,
   zipOutputs,
   type ConversionOutput
 } from "./conversionHelpers";
@@ -57,7 +58,8 @@ const ADVANCED_RECIPE_IDS = new Set([
   "font-web-pack",
   "font-specimen",
   "model3d-preview",
-  "ebook-to-text"
+  "ebook-to-text",
+  "application-compress-zip"
 ]);
 
 let pdfWorkerBlobUrl: string | null = null;
@@ -138,6 +140,8 @@ export async function convertAdvancedRecipe(file: File, _inspection: FileInspect
       return [await modelPreviewPack(file, baseName)];
     case "ebook-to-text":
       return [await ebookToText(file, baseName, settings)];
+    case "application-compress-zip":
+      return [await compressApplicationPackage(file, baseName, settings)];
     default:
       throw new Error("This converter is not available yet.");
   }
@@ -587,6 +591,30 @@ async function ebookToText(file: File, baseName: string, settings: ConversionSet
   if (settings.outputFormat?.includes("Markdown")) return textOutput(`${baseName}.md`, chapterOutputs.map((chapter) => `## ${escapeMarkdown(chapter.name)}\n\n${chapter.text}`).join("\n\n"), "text/markdown;charset=utf-8");
   if (settings.outputFormat?.includes("ZIP")) return zipOutputs(`${baseName}-chapters.zip`, chapterOutputs.map((chapter) => textOutput(chapter.name, chapter.text, "text/plain;charset=utf-8")));
   return textOutput(`${baseName}.txt`, chapterOutputs.map((chapter) => `${chapter.name}\n\n${chapter.text}`).join("\n\n"), "text/plain;charset=utf-8");
+}
+
+async function compressApplicationPackage(file: File, baseName: string, settings: ConversionSettings) {
+  const originalBytes = new Uint8Array(await file.arrayBuffer());
+  const checksum = await sha256Hex(originalBytes);
+  const compression = settings.compression || "Maximum Deflate";
+  const manifest = {
+    source: file.name,
+    type: file.type || "application/octet-stream",
+    bytes: file.size,
+    compression,
+    sha256: checksum,
+    note: "Executable and installer files are preserved byte-for-byte inside the ZIP. Many application packages are already compressed, so size reduction depends on the source file."
+  };
+
+  return zipOutputs(
+    `${baseName}-compressed.zip`,
+    [
+      { name: `original/${safeZipPath(file.name)}`, blob: new Blob([toArrayBuffer(originalBytes)], { type: file.type || "application/octet-stream" }) },
+      jsonOutput("manifest.json", manifest),
+      textOutput("README.txt", `Compressed application package generated locally.\n\nSource: ${file.name}\nSHA-256: ${checksum}\nOriginal bytes: ${file.size}\nMode: ${compression}\n`, "text/plain;charset=utf-8")
+    ],
+    zipLevelFromCompression(settings.compression)
+  );
 }
 
 async function loadPdf(file: File) {
@@ -1065,6 +1093,13 @@ function decodeXml(value: string) {
 
 function safeZipPath(name: string) {
   return name.replace(/^[a-z]+:\/+/i, "").replace(/\.\.+/g, ".").replace(/^\/+/, "");
+}
+
+async function sha256Hex(bytes: Uint8Array) {
+  const hash = await crypto.subtle.digest("SHA-256", toArrayBuffer(bytes));
+  return Array.from(new Uint8Array(hash))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function fontFormat(ext: string) {

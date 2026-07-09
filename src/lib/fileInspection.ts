@@ -61,7 +61,18 @@ const EXTENSION_FAMILY: Record<string, FileFamily> = {
   stl: "model3d",
   fbx: "model3d",
   epub: "ebook",
-  mobi: "ebook"
+  mobi: "ebook",
+  exe: "application",
+  msi: "application",
+  app: "application",
+  apk: "application",
+  dmg: "application",
+  pkg: "application",
+  deb: "application",
+  rpm: "application",
+  appimage: "application",
+  bin: "application",
+  run: "application"
 };
 
 export async function inspectFile(file: File): Promise<FileInspection> {
@@ -99,8 +110,17 @@ function inferFamily(mime: string, extension: string): FileFamily {
   if (mime.includes("spreadsheet") || mime.includes("excel")) return "spreadsheet";
   if (mime.includes("presentation") || mime.includes("powerpoint")) return "presentation";
   if (mime.includes("zip") || mime.includes("compressed")) return "archive";
+  if (isApplicationPackageMime(mime) || isApplicationPackageExtension(extension)) return "application";
   if (mime.includes("json") || mime.includes("xml") || mime.startsWith("text/")) return EXTENSION_FAMILY[extension] ?? "data";
   return EXTENSION_FAMILY[extension] ?? "unknown";
+}
+
+function isApplicationPackageMime(mime: string) {
+  return /x-msdownload|x-msdos-program|portable-executable|x-msi|vnd\.microsoft\.installer|vnd\.android\.package-archive|octet-stream/i.test(mime);
+}
+
+function isApplicationPackageExtension(extension: string) {
+  return EXTENSION_FAMILY[extension] === "application";
 }
 
 async function inspectImage(file: File): Promise<Partial<FileInspection>> {

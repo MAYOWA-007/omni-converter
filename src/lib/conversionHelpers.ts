@@ -5,6 +5,8 @@ export interface ConversionOutput {
   blob: Blob;
 }
 
+type ZipLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
 export function downloadOutput(output: ConversionOutput) {
   const url = URL.createObjectURL(output.blob);
   const anchor = document.createElement("a");
@@ -16,7 +18,7 @@ export function downloadOutput(output: ConversionOutput) {
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-export async function zipOutputs(name: string, outputs: ConversionOutput[]): Promise<ConversionOutput> {
+export async function zipOutputs(name: string, outputs: ConversionOutput[], level: ZipLevel = 9): Promise<ConversionOutput> {
   const { strToU8, zipSync } = await import("fflate");
   const files: Record<string, Uint8Array> = {};
 
@@ -30,7 +32,7 @@ export async function zipOutputs(name: string, outputs: ConversionOutput[]): Pro
 
   return {
     name,
-    blob: new Blob([toArrayBuffer(zipSync(files, { level: 9 }))], { type: "application/zip" })
+    blob: new Blob([toArrayBuffer(zipSync(files, { level }))], { type: "application/zip" })
   };
 }
 
@@ -78,6 +80,13 @@ export function audioBitrateFromCompression(value?: string) {
   if (/small/i.test(value)) return "128k";
   if (/tiny/i.test(value)) return "80k";
   return "192k";
+}
+
+export function zipLevelFromCompression(value?: string): ZipLevel {
+  if (!value) return 9;
+  if (/store|none|uncompressed/i.test(value)) return 0;
+  if (/balanced/i.test(value)) return 6;
+  return 9;
 }
 
 export function baseFileName(name: string, fallback = "converted") {

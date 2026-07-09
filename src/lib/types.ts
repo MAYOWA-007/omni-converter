@@ -12,6 +12,7 @@ export type FileFamily =
   | "font"
   | "model3d"
   | "ebook"
+  | "application"
   | "unknown";
 
 export type Capability =

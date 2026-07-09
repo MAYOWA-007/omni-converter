@@ -14,6 +14,7 @@ export const FAMILY_LABELS: Record<FileFamily, string> = {
   font: "Font",
   model3d: "3D model",
   ebook: "Ebook",
+  application: "Application",
   unknown: "Unknown"
 };
 
@@ -897,6 +898,26 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     requiredCapabilities: ["zip", "worker"],
     intensity: "standard",
     engine: "EPUB ZIP/XML reader"
+  }),
+  recipe({
+    id: "application-compress-zip",
+    input: ["application"],
+    category: "Compression",
+    output: "Compressed ZIP",
+    title: "Compress application package",
+    description: "Package an executable, installer, or app binary into a compressed ZIP with a checksum manifest.",
+    treatments: ["Maximum ZIP compression", "SHA-256 checksum", "Manifest", "Original preserved"],
+    keywords: ["exe", "msi", "installer", "app", "apk", "dmg", "binary", "compress", "zip", "checksum", "package"],
+    editorControls: ["compression", "metadata", "batchNaming", "bundle"],
+    controlOptions: {
+      compression: ["Maximum Deflate", "Balanced ZIP", "Store only"],
+      metadata: ["Checksum manifest", "Inspect report", "Keep source metadata"],
+      batchNaming: ["Keep source name", "Clean filename", "Version suffix", "Custom pattern"],
+      bundle: ["ZIP with manifest", "ZIP with README", "Single compressed ZIP"]
+    },
+    requiredCapabilities: ["zip", "worker"],
+    intensity: "standard",
+    engine: "fflate ZIP + Web Crypto"
   })
 ];
 
@@ -946,7 +967,12 @@ const SEARCH_ALIASES: Record<string, string[]> = {
   spreadsheet: ["spreadsheet", "excel", "xlsx", "csv", "chart", "table", "data"],
   data: ["data", "json", "csv", "xml", "yaml", "table", "schema"],
   font: ["font", "ttf", "otf", "woff", "woff2", "glyph", "specimen"],
-  model: ["3d", "model", "glb", "gltf", "obj", "stl", "preview"]
+  model: ["3d", "model", "glb", "gltf", "obj", "stl", "preview"],
+  exe: ["exe", "application", "binary", "installer", "compress", "zip", "package"],
+  msi: ["msi", "application", "installer", "compress", "zip", "package"],
+  installer: ["installer", "exe", "msi", "application", "binary", "compress", "zip"],
+  application: ["application", "app", "exe", "installer", "binary", "compress", "zip", "package"],
+  binary: ["binary", "application", "exe", "compress", "zip", "checksum"]
 };
 
 export function filterRecipesByQuery(recipes: ConversionRecipe[], query: string) {
