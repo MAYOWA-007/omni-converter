@@ -681,6 +681,28 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     engine: "Web Audio + FFmpeg WASM"
   }),
   recipe({
+    id: "audio-to-video",
+    input: ["audio"],
+    category: "Video",
+    output: "MP4 / WebM",
+    title: "Audio to video",
+    description: "Create a video from audio with a clean waveform visual, title card, and embedded sound.",
+    treatments: ["Waveform video", "MP4", "WebM", "Title card"],
+    keywords: ["audio", "video", "music", "podcast", "audiogram", "waveform", "mp4", "webm", "sound"],
+    editorControls: ["outputFormat", "aspectRatio", "resolution", "frameRate", "waveform", "color", "compression", "metadata", "batchNaming"],
+    controlOptions: {
+      outputFormat: ["MP4", "WebM"],
+      aspectRatio: ["16:9 widescreen", "9:16 vertical", "1:1 square", "4:5 portrait"],
+      resolution: ["1080 px", "1920 px", "2K", "4K"],
+      frameRate: ["24 fps", "30 fps", "60 fps"],
+      waveform: ["Animated waveform", "Static waveform", "Progress bar"],
+      compression: ["Maximum quality", "High quality", "Balanced", "Small file"]
+    },
+    requiredCapabilities: ["audio", "canvas", "mediarecorder", "wasm", "worker"],
+    intensity: "heavy",
+    engine: "Web Audio + Canvas + MediaRecorder + FFmpeg WASM"
+  }),
+  recipe({
     id: "audio-waveform",
     input: ["audio", "video"],
     category: "Audio visual",
@@ -962,8 +984,14 @@ const SEARCH_ALIASES: Record<string, string[]> = {
   zip: ["zip", "bundle", "all", "multiple", "pack", "set", "archive"],
   archive: ["archive", "zip", "extract", "repack", "manifest"],
   thumbnail: ["thumbnail", "thumb", "preview", "social", "web", "sizes"],
-  audio: ["audio", "mp3", "wav", "m4a", "aac", "waveform", "sound"],
-  video: ["video", "mp4", "webm", "gif", "frames", "clips", "motion"],
+  audio: ["audio", "mp3", "wav", "m4a", "aac", "waveform", "sound", "music", "podcast", "audiogram"],
+  audtio: ["audio", "mp3", "wav", "sound", "music", "podcast"],
+  auido: ["audio", "mp3", "wav", "sound", "music", "podcast"],
+  aduio: ["audio", "mp3", "wav", "sound", "music", "podcast"],
+  video: ["video", "mp4", "webm", "gif", "frames", "clips", "motion", "audiogram"],
+  videdo: ["video", "mp4", "webm", "motion", "audiogram"],
+  vidoe: ["video", "mp4", "webm", "motion", "audiogram"],
+  vedio: ["video", "mp4", "webm", "motion", "audiogram"],
   spreadsheet: ["spreadsheet", "excel", "xlsx", "csv", "chart", "table", "data"],
   data: ["data", "json", "csv", "xml", "yaml", "table", "schema"],
   font: ["font", "ttf", "otf", "woff", "woff2", "glyph", "specimen"],
@@ -981,7 +1009,8 @@ export function filterRecipesByQuery(recipes: ConversionRecipe[], query: string)
 
   return recipes.filter((recipe) => {
     const index = buildRecipeSearchIndex(recipe);
-    return terms.every((group) => group.some((term) => index.includes(term)));
+    const indexTokens = index.split(" ");
+    return terms.every((group) => group.some((term) => index.includes(term) || fuzzyIncludes(indexTokens, term)));
   });
 }
 
@@ -1015,4 +1044,26 @@ function buildRecipeSearchIndex(recipe: ConversionRecipe) {
 
 function normalizeSearchText(value: string) {
   return value.toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function fuzzyIncludes(indexTokens: string[], term: string) {
+  if (term.length < 4) return false;
+  return indexTokens.some((token) => token.length >= 4 && Math.abs(token.length - term.length) <= 2 && editDistanceWithin(term, token, term.length > 6 ? 2 : 1));
+}
+
+function editDistanceWithin(a: string, b: string, limit: number) {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let rowMin = current[0];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const value = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
+      current[j] = value;
+      rowMin = Math.min(rowMin, value);
+    }
+    if (rowMin > limit) return false;
+    previous = current;
+  }
+  return previous[b.length] <= limit;
 }

@@ -43,6 +43,7 @@ const ADVANCED_RECIPE_IDS = new Set([
   "video-thumbnail-sheet",
   "audio-to-mp3",
   "audio-to-wav",
+  "audio-to-video",
   "audio-waveform",
   "spreadsheet-to-csv",
   "spreadsheet-to-json",
@@ -108,6 +109,8 @@ export async function convertAdvancedRecipe(file: File, _inspection: FileInspect
       return [await transcodeWithFfmpeg(file, baseName, "mp3", settings)];
     case "audio-to-wav":
       return [await createWavAudio(file, baseName, settings)];
+    case "audio-to-video":
+      return [await createAudioVideo(file, baseName, settings)];
     case "audio-waveform":
       return [await createWaveformPack(file, baseName, settings)];
     case "spreadsheet-to-csv":
@@ -426,6 +429,23 @@ async function createWaveformPack(file: File, baseName: string, settings: Conver
     { name: `${baseName}-waveform.png`, blob: png },
     jsonOutput("peaks.json", { source: file.name, duration: buffer.duration, sampleRate: buffer.sampleRate, peaks })
   ]);
+}
+
+async function createAudioVideo(file: File, baseName: string, settings: ConversionSettings) {
+  const context = new AudioContext();
+  const buffer = await context.decodeAudioData(await file.arrayBuffer());
+  await context.close();
+  const fps = Math.min(60, Math.max(12, numberFromSetting(settings.frameRate, 30)));
+  const webm = await recordAudioWaveformWebm(file.name, buffer, settings, fps);
+  const output = (settings.outputFormat ?? "MP4").toLowerCase();
+  if (output.includes("webm")) return { name: `${baseName}.webm`, blob: webm };
+  return transcodeBlobWithFfmpeg(
+    webm,
+    "input.webm",
+    `${baseName}.mp4`,
+    ["-i", "input.webm", "-c:v", "libx264", "-preset", "slow", "-crf", crfFromCompression(settings.compression), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", audioBitrateFromCompression(settings.compression), "-shortest", "-movflags", "faststart", "output.mp4"],
+    "video/mp4"
+  );
 }
 
 async function spreadsheetRows(file: File) {
@@ -893,6 +913,128 @@ async function recordImageMotionWebm(file: File, duration: number, fps: number) 
   });
   stream.getTracks().forEach((track) => track.stop());
   return new Blob(chunks, { type: "video/webm" });
+}
+
+async function recordAudioWaveformWebm(title: string, buffer: AudioBuffer, settings: ConversionSettings, fps: number) {
+  const size = audioVideoSize(settings.aspectRatio, settings.resolution);
+  const canvas = document.createElement("canvas");
+  canvas.width = size.width;
+  canvas.height = size.height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas is not available in this browser.");
+
+  const peaks = waveformPeaks(buffer, 220);
+  const canvasStream = canvas.captureStream(fps);
+  const playback = new AudioContext();
+  const source = playback.createBufferSource();
+  const gain = playback.createGain();
+  const destination = playback.createMediaStreamDestination();
+  source.buffer = buffer;
+  gain.gain.value = gainFromSetting(settings.audioGain);
+  source.connect(gain).connect(destination);
+
+  const stream = new MediaStream([...canvasStream.getVideoTracks(), ...destination.stream.getAudioTracks()]);
+  const mimeType = audioVideoRecorderMime();
+  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  const chunks: Blob[] = [];
+  recorder.ondataavailable = (event) => {
+    if (event.data.size) chunks.push(event.data);
+  };
+
+  drawAudioVideoFrame(context, canvas, peaks, 0, title, buffer.duration, settings);
+  recorder.start(250);
+  await playback.resume();
+  const startedAt = playback.currentTime;
+  const ended = new Promise<void>((resolve) => {
+    source.onended = () => resolve();
+  });
+  source.start();
+
+  await Promise.all([
+    ended,
+    new Promise<void>((resolve) => {
+      const render = () => {
+        const elapsed = playback.currentTime - startedAt;
+        const progress = Math.min(1, elapsed / Math.max(0.01, buffer.duration));
+        drawAudioVideoFrame(context, canvas, peaks, progress, title, buffer.duration, settings);
+        if (progress < 1) {
+          window.requestAnimationFrame(render);
+        } else {
+          resolve();
+        }
+      };
+      window.requestAnimationFrame(render);
+    })
+  ]);
+
+  await new Promise<void>((resolve) => {
+    recorder.onstop = () => resolve();
+    recorder.stop();
+  });
+  stream.getTracks().forEach((track) => track.stop());
+  await playback.close();
+  return new Blob(chunks, { type: "video/webm" });
+}
+
+function audioVideoRecorderMime() {
+  return ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((mime) => MediaRecorder.isTypeSupported(mime));
+}
+
+function audioVideoSize(aspectRatio: string | undefined, resolution: string | undefined) {
+  const ratio = aspectSize(aspectRatio, "16:9");
+  const width = pixelWidth(resolution, 1920);
+  return {
+    width,
+    height: Math.max(1, Math.round((width * ratio.height) / ratio.width))
+  };
+}
+
+function drawAudioVideoFrame(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, peaks: number[], progress: number, title: string, duration: number, settings: ConversionSettings) {
+  const width = canvas.width;
+  const height = canvas.height;
+  const padding = Math.max(40, Math.round(width * 0.055));
+  const name = title.replace(/\.[^.]+$/, "");
+  const animated = !settings.waveform?.includes("Static");
+  const activeProgress = animated ? progress : 1;
+  const gradient = context.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, "#17110d");
+  gradient.addColorStop(0.55, "#0d1713");
+  gradient.addColorStop(1, "#050505");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, width, height);
+
+  context.strokeStyle = "rgba(224, 190, 112, 0.42)";
+  context.lineWidth = Math.max(2, width / 760);
+  context.strokeRect(padding * 0.55, padding * 0.55, width - padding * 1.1, height - padding * 1.1);
+
+  context.fillStyle = "#fff7e8";
+  context.font = `700 ${Math.max(28, Math.round(width / 28))}px Georgia, serif`;
+  context.textAlign = "center";
+  context.fillText(name.slice(0, 72), width / 2, padding * 1.55);
+
+  const waveTop = height * 0.34;
+  const waveHeight = height * 0.34;
+  const barGap = Math.max(1, width / 760);
+  const barWidth = Math.max(2, (width - padding * 2) / peaks.length - barGap);
+  peaks.forEach((peak, index) => {
+    const x = padding + index * (barWidth + barGap);
+    const barHeight = Math.max(3, peak * waveHeight);
+    const isActive = index / peaks.length <= activeProgress;
+    context.fillStyle = isActive ? "#f4d98f" : "rgba(255, 247, 232, 0.24)";
+    context.fillRect(x, waveTop + (waveHeight - barHeight) / 2, barWidth, barHeight);
+  });
+
+  const progressY = height - padding * 1.7;
+  context.fillStyle = "rgba(255, 247, 232, 0.22)";
+  context.fillRect(padding, progressY, width - padding * 2, Math.max(4, height / 170));
+  context.fillStyle = "#d7b76d";
+  context.fillRect(padding, progressY, (width - padding * 2) * progress, Math.max(4, height / 170));
+  context.fillStyle = "rgba(255, 247, 232, 0.82)";
+  context.font = `500 ${Math.max(14, Math.round(width / 86))}px system-ui, sans-serif`;
+  context.textAlign = "left";
+  context.fillText(formatTimestamp(progress * duration), padding, progressY + padding * 0.72);
+  context.textAlign = "right";
+  context.fillText(formatTimestamp(duration), width - padding, progressY + padding * 0.72);
 }
 
 function handoutSlots(width: number, height: number, margin: number, count: number) {
