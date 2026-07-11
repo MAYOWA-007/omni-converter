@@ -38,10 +38,12 @@ export type Capability =
 export type Intensity = "light" | "standard" | "heavy" | "extreme";
 
 export type EditorControl =
+  | "archiveSelection"
   | "outputFormat"
   | "timeline"
   | "trim"
   | "crop"
+  | "rotation"
   | "aspectRatio"
   | "resolution"
   | "frameRate"
@@ -49,12 +51,21 @@ export type EditorControl =
   | "chapterInterval"
   | "audioGain"
   | "audioFade"
+  | "sampleRate"
+  | "audioChannels"
+  | "bitDepth"
   | "waveform"
   | "captions"
   | "color"
   | "compression"
+  | "dataTypes"
+  | "formulaSafety"
+  | "headerMode"
   | "pageOrder"
+  | "pageLayout"
   | "pageSize"
+  | "sheetSelection"
+  | "slideSelection"
   | "margins"
   | "metadata"
   | "watermark"
@@ -63,7 +74,20 @@ export type EditorControl =
 
 export type ConversionImplementation = "ready" | "planned";
 
-export type ConversionSettings = Partial<Record<EditorControl, string>>;
+export type RecipeMaturity = "planned" | "implemented" | "verified";
+
+export type RecipeRuntime = "browser";
+
+export interface RecipeAvailability {
+  maturity: RecipeMaturity;
+  runtime: RecipeRuntime;
+  selectable: boolean;
+}
+
+export type ConversionSettings = Partial<Record<EditorControl, string>> & {
+  trimStart?: number;
+  trimEnd?: number;
+};
 
 export interface ConversionRecipe {
   id: string;
@@ -74,12 +98,15 @@ export interface ConversionRecipe {
   description: string;
   treatments: string[];
   keywords?: string[];
+  inputFormats?: string[];
   editorControls: EditorControl[];
   controlOptions?: Partial<Record<EditorControl, string[]>>;
   requiredCapabilities: Capability[];
   intensity: Intensity;
   engine: string;
   implementation: ConversionImplementation;
+  maturity: RecipeMaturity;
+  runtimes: RecipeRuntime[];
   localOnly: true;
 }
 
@@ -92,7 +119,19 @@ export interface FileInspection {
   width?: number;
   height?: number;
   duration?: number;
+  sampleRate?: number;
+  audioChannels?: number;
+  videoCodec?: string;
+  audioCodec?: string;
+  mediaTargets?: { mp4: boolean; webm: boolean };
   pages?: number;
+  sheets?: string[];
+  slides?: number;
+  archiveEntries?: Array<{ name: string; size: number }>;
+  exactFormat?: string;
+  signatureSource?: "signature" | "unknown";
+  riskBlocked?: boolean;
+  riskReasons?: string[];
   notes: string[];
 }
 

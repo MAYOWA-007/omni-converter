@@ -1,4 +1,5 @@
 import type { ConversionSettings } from "./types";
+import { archivePathKey, normalizeArchivePath } from "../core/archivePaths";
 
 export interface ConversionOutput {
   name: string;
@@ -7,51 +8,36 @@ export interface ConversionOutput {
 
 type ZipLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
-export function downloadOutput(output: ConversionOutput) {
-  const url = URL.createObjectURL(output.blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = output.name;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
-
 export async function zipOutputs(name: string, outputs: ConversionOutput[], level: ZipLevel = 9): Promise<ConversionOutput> {
-  const { strToU8, zipSync } = await import("fflate");
-  const files: Record<string, Uint8Array> = {};
-
-  for (const output of outputs) {
-    if (isTextLike(output)) {
-      files[output.name] = strToU8(await output.blob.text());
-    } else {
-      files[output.name] = new Uint8Array(await output.blob.arrayBuffer());
+  const paths = new Set<string>();
+  const entries = outputs.map((output) => {
+    const path = normalizeArchivePath(output.name);
+    const key = archivePathKey(path);
+    if (paths.has(key)) throw new Error(`Archive contains a duplicate output path: ${path}`);
+    paths.add(key);
+    return { path, blob: output.blob };
+  });
+  const { BlobReader, BlobWriter, ZipWriter } = await import("@zip.js/zip.js");
+  const blobWriter = new BlobWriter("application/zip");
+  const zipWriter = new ZipWriter(blobWriter, {
+    level,
+    useWebWorkers: level > 0,
+    bufferedWrite: false,
+    keepOrder: true
+  });
+  try {
+    for (const entry of entries) {
+      await zipWriter.add(entry.path, new BlobReader(entry.blob), { level, useWebWorkers: level > 0 });
     }
+    return { name, blob: await zipWriter.close() };
+  } catch (error) {
+    try {
+      await zipWriter.close();
+    } catch {
+      // Preserve the conversion error while allowing zip.js to release any worker state it can.
+    }
+    throw error;
   }
-
-  return {
-    name,
-    blob: new Blob([toArrayBuffer(zipSync(files, { level }))], { type: "application/zip" })
-  };
-}
-
-export function isTextLike(output: ConversionOutput) {
-  return (
-    output.blob.type.startsWith("text/") ||
-    output.name.endsWith(".json") ||
-    output.name.endsWith(".xml") ||
-    output.name.endsWith(".rels") ||
-    output.name.endsWith(".svg") ||
-    output.name.endsWith(".md") ||
-    output.name.endsWith(".csv") ||
-    output.name.endsWith(".tsv") ||
-    output.name.endsWith(".yaml") ||
-    output.name.endsWith(".yml") ||
-    output.name.endsWith(".html") ||
-    output.name.endsWith(".css") ||
-    output.name.endsWith(".webmanifest")
-  );
 }
 
 export function qualityFromCompression(value?: string) {

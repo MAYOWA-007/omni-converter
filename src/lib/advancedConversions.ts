@@ -1,3 +1,4 @@
+import { sanitizeGeneratedHtml } from "../core/sanitize";
 import {
   audioBitrateFromCompression,
   baseFileName,
@@ -10,22 +11,23 @@ import {
   parseDelimited,
   qualityFromCompression,
   renderImage,
-  rowsToCsv,
-  rowsToMarkdown,
-  rowsToObjects,
-  stringifyYaml,
   toArrayBuffer,
   zipLevelFromCompression,
   zipOutputs,
   type ConversionOutput
 } from "./conversionHelpers";
+import { selectPdfPageNumbers } from "./pdfPageSelection";
+import { convertSpreadsheetToDelimited, convertSpreadsheetToJson, convertStructuredData } from "./dataConversions";
+import { convertDocxToHtml, convertDocxToMarkdown, convertPptxText, extractOfficeAssets } from "./officeConversions";
+import { compressApplicationPackage as compressApplicationToZip, createExtractedZip, inspectZipArchive, repackZipArchive } from "./archiveConversions";
+import { convertEpub } from "./ebookConversions";
 import type { ConversionRecipe, ConversionSettings, FileInspection } from "./types";
+import type { LegacyExecutionContext } from "../engines/types";
 
-const ffmpegCoreURL = `${import.meta.env.BASE_URL}assets/ffmpeg/ffmpeg-core.js`;
-const ffmpegWasmURL = `${import.meta.env.BASE_URL}assets/ffmpeg/ffmpeg-core.wasm`;
+const ffmpegCoreURL = `${import.meta.env?.BASE_URL ?? "/"}assets/ffmpeg/ffmpeg-core.js`;
+const ffmpegWasmURL = `${import.meta.env?.BASE_URL ?? "/"}assets/ffmpeg/ffmpeg-core.wasm`;
 
 const ADVANCED_RECIPE_IDS = new Set([
-  "image-social-pack",
   "image-ocr-text",
   "image-to-motion-card",
   "pdf-slide-images",
@@ -35,16 +37,8 @@ const ADVANCED_RECIPE_IDS = new Set([
   "pdf-extract-images",
   "pdf-ocr-searchable",
   "pdf-compress",
-  "video-to-frames",
-  "video-to-mp4",
-  "video-to-webm",
   "video-to-gif",
-  "video-to-audio",
-  "video-thumbnail-sheet",
   "audio-to-mp3",
-  "audio-to-wav",
-  "audio-to-video",
-  "audio-waveform",
   "spreadsheet-to-csv",
   "spreadsheet-to-json",
   "spreadsheet-chart-pack",
@@ -52,8 +46,9 @@ const ADVANCED_RECIPE_IDS = new Set([
   "document-to-markdown",
   "document-to-html",
   "document-assets",
-  "presentation-slide-images",
+  "presentation-assets",
   "presentation-notes",
+  "archive-inspect",
   "archive-extract",
   "archive-repack-zip",
   "font-web-pack",
@@ -69,7 +64,22 @@ export function canConvertAdvancedRecipe(recipe: ConversionRecipe) {
   return ADVANCED_RECIPE_IDS.has(recipe.id);
 }
 
-export async function convertAdvancedRecipe(file: File, _inspection: FileInspection, recipe: ConversionRecipe, settings: ConversionSettings = {}): Promise<ConversionOutput[]> {
+export async function convertAdvancedRecipe(file: File, inspection: FileInspection, recipe: ConversionRecipe, settings: ConversionSettings = {}, execution?: LegacyExecutionContext): Promise<ConversionOutput[]> {
+  throwIfAborted(execution?.signal);
+  execution?.reportProgress({ completed: 0, total: 1, label: "Preparing advanced conversion" });
+  const outputs = await convertAdvancedRecipeImpl(file, inspection, recipe, settings);
+  throwIfAborted(execution?.signal);
+  execution?.reportProgress({ completed: 1, total: 1, label: "Advanced conversion complete" });
+  return outputs;
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException("Conversion was cancelled.", "AbortError");
+  }
+}
+
+async function convertAdvancedRecipeImpl(file: File, _inspection: FileInspection, recipe: ConversionRecipe, settings: ConversionSettings = {}): Promise<ConversionOutput[]> {
   const baseName = baseFileName(file.name, "converted-file");
 
   switch (recipe.id) {
@@ -84,7 +94,7 @@ export async function convertAdvancedRecipe(file: File, _inspection: FileInspect
     case "pdf-carousel-images":
       return [await renderPdfPagePack(file, baseName, "carousel", settings)];
     case "pdf-pptx-outline":
-      return [await createPdfPptxOutline(file, baseName)];
+      return [await createPdfPptxOutline(file, baseName, settings)];
     case "pdf-handout-pdf":
       return [await createPdfHandout(file, baseName, settings)];
     case "pdf-extract-images":
@@ -93,48 +103,34 @@ export async function convertAdvancedRecipe(file: File, _inspection: FileInspect
       return [await createSearchablePdf(file, baseName, settings)];
     case "pdf-compress":
       return [await compressPdf(file, baseName, settings)];
-    case "video-to-frames":
-      return [await createVideoFrames(file, baseName, settings)];
-    case "video-thumbnail-sheet":
-      return [await createVideoContactSheet(file, baseName, settings)];
-    case "video-to-mp4":
-      return [await transcodeWithFfmpeg(file, baseName, "mp4", settings)];
-    case "video-to-webm":
-      return [await transcodeWithFfmpeg(file, baseName, "webm", settings)];
     case "video-to-gif":
       return [await transcodeWithFfmpeg(file, baseName, "gif", settings)];
-    case "video-to-audio":
-      return [await transcodeWithFfmpeg(file, baseName, audioExtension(settings.outputFormat), settings)];
     case "audio-to-mp3":
       return [await transcodeWithFfmpeg(file, baseName, "mp3", settings)];
-    case "audio-to-wav":
-      return [await createWavAudio(file, baseName, settings)];
-    case "audio-to-video":
-      return [await createAudioVideo(file, baseName, settings)];
-    case "audio-waveform":
-      return [await createWaveformPack(file, baseName, settings)];
     case "spreadsheet-to-csv":
-      return [await spreadsheetToDelimited(file, baseName, settings)];
+      return [await convertSpreadsheetToDelimited(file, baseName, settings)];
     case "spreadsheet-to-json":
-      return [await spreadsheetToJson(file, baseName, settings)];
+      return [await convertSpreadsheetToJson(file, baseName, settings)];
     case "spreadsheet-chart-pack":
       return [await spreadsheetChartPack(file, baseName, settings)];
     case "data-json-csv":
-      return [await transformStructuredData(file, baseName, settings)];
+      return [await convertStructuredData(file, baseName, settings)];
     case "document-to-markdown":
-      return [await documentToMarkdown(file, baseName)];
+      return [await convertDocxToMarkdown(file, baseName, settings)];
     case "document-to-html":
-      return [await documentToHtml(file, baseName)];
+      return [await convertDocxToHtml(file, baseName, settings)];
     case "document-assets":
-      return [await extractZipAssets(file, baseName, "document-assets")];
-    case "presentation-slide-images":
-      return [await presentationSlideImages(file, baseName, settings)];
+      return [await extractOfficeAssets(file, baseName, "document", settings)];
+    case "presentation-assets":
+      return [await extractOfficeAssets(file, baseName, "presentation", settings)];
     case "presentation-notes":
-      return [await presentationNotes(file, baseName, settings)];
+      return [await convertPptxText(file, baseName, settings)];
+    case "archive-inspect":
+      return [await inspectZipArchive(file, baseName, settings)];
     case "archive-extract":
-      return [await extractArchive(file, baseName)];
+      return [await createExtractedZip(file, baseName, settings)];
     case "archive-repack-zip":
-      return [await repackArchive(file, baseName)];
+      return [await repackZipArchive(file, baseName, settings)];
     case "font-web-pack":
       return [await fontWebPack(file, baseName)];
     case "font-specimen":
@@ -142,9 +138,9 @@ export async function convertAdvancedRecipe(file: File, _inspection: FileInspect
     case "model3d-preview":
       return [await modelPreviewPack(file, baseName)];
     case "ebook-to-text":
-      return [await ebookToText(file, baseName, settings)];
+      return [await convertEpub(file, baseName, settings)];
     case "application-compress-zip":
-      return [await compressApplicationPackage(file, baseName, settings)];
+      return compressApplicationToZip(file, baseName, settings);
     default:
       throw new Error("This converter is not available yet.");
   }
@@ -206,9 +202,11 @@ async function renderPdfPagePack(file: File, baseName: string, mode: "slide" | "
   const width = pixelWidth(settings.resolution, mode === "slide" ? 1920 : 1080);
   const height = Math.round((width * ratio.height) / ratio.width);
   const quality = qualityFromCompression(settings.compression);
+  let selectedPages: number[] = [];
 
   try {
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    selectedPages = selectPdfPageNumbers(pdf.numPages, settings.pageOrder);
+    for (const pageNumber of selectedPages) {
       const page = await pdf.getPage(pageNumber);
       const viewport = page.getViewport({ scale: scaleFromResolution(settings.resolution) });
       const source = document.createElement("canvas");
@@ -231,21 +229,31 @@ async function renderPdfPagePack(file: File, baseName: string, mode: "slide" | "
       context.drawImage(source, rect.x, rect.y, rect.width, rect.height);
       const extension = settings.outputFormat?.includes("JPEG") ? "jpg" : "png";
       const mime = extension === "jpg" ? "image/jpeg" : "image/png";
-      outputs.push({ name: `${mode}/${baseName}-${mode}-${String(pageNumber).padStart(3, "0")}.${extension}`, blob: await canvasToBlob(canvas, mime, extension === "jpg" ? quality : undefined) });
+      outputs.push({ name: `${mode}/${pdfPackOutputName(baseName, mode, pageNumber, extension, settings.batchNaming)}`, blob: await canvasToBlob(canvas, mime, extension === "jpg" ? quality : undefined) });
     }
   } finally {
     await pdf.cleanup();
   }
-  outputs.push(jsonOutput("manifest.json", { source: file.name, mode, width, height, pages: outputs.map((output) => output.name) }));
-  return zipOutputs(`${baseName}-${mode}-images.zip`, outputs);
+  if (/manifest/i.test(settings.bundle ?? "")) {
+    outputs.push(jsonOutput("manifest.json", { source: file.name, mode, width, height, selectedPages, pages: outputs.map((output) => output.name) }));
+  }
+  return zipOutputs(`${baseName}-${mode}-images.zip`, outputs, zipLevelFromCompression(settings.bundle));
 }
 
-async function createPdfPptxOutline(file: File, baseName: string) {
-  const pages = await extractPdfText(file);
-  const files: ConversionOutput[] = createPptxFiles(file.name, pages.map((page) => ({ title: `Page ${page.pageNumber}`, body: page.text || "No selectable text found." })));
+function pdfPackOutputName(baseName: string, mode: "slide" | "carousel", pageNumber: number, extension: string, naming?: string) {
+  const padded = String(pageNumber).padStart(3, "0");
+  if (naming === "Page number only") return `page-${padded}.${extension}`;
+  if (naming === "Clean filename") return `${baseName}-${padded}.${extension}`;
+  return `${baseName}-${mode}-${padded}.${extension}`;
+}
+
+async function createPdfPptxOutline(file: File, baseName: string, settings: ConversionSettings) {
+  const pages = await extractPdfText(file, settings.pageOrder);
+  const files: ConversionOutput[] = createPptxFiles(settings.metadata === "Include source note" ? file.name : undefined, pages.map((page) => ({ title: `Page ${page.pageNumber}`, body: page.text || "No selectable text found." })));
+  const suffix = settings.batchNaming === "Clean filename" ? "" : "-outline";
   return {
-    name: `${baseName}-outline.pptx`,
-    blob: (await zipOutputs(`${baseName}-outline.pptx`, files)).blob
+    name: `${baseName}${suffix}.pptx`,
+    blob: (await zipOutputs(`${baseName}${suffix}.pptx`, files, zipLevelFromCompression(settings.bundle))).blob
   };
 }
 
@@ -255,9 +263,10 @@ async function createPdfHandout(file: File, baseName: string, settings: Conversi
   const source = await PDFDocument.load(bytes);
   const output = await PDFDocument.create();
   const pageSize = settings.pageSize?.includes("A4") ? [595.28, 841.89] : [612, 792];
-  const perSheet = settings.pageSize?.includes("4") ? 4 : 2;
+  const perSheet = settings.pageLayout?.startsWith("4 ") ? 4 : 2;
   const margin = settings.margins?.includes("Wide") ? 54 : settings.margins?.includes("Narrow") ? 24 : 36;
-  const copied = await output.copyPages(source, source.getPageIndices());
+  const selectedPages = selectPdfPageNumbers(source.getPageCount(), settings.pageOrder);
+  const copied = await output.copyPages(source, selectedPages.map((pageNumber) => pageNumber - 1));
   for (let index = 0; index < copied.length; index += perSheet) {
     const page = output.addPage(pageSize as [number, number]);
     const slots = handoutSlots(pageSize[0], pageSize[1], margin, perSheet);
@@ -268,7 +277,16 @@ async function createPdfHandout(file: File, baseName: string, settings: Conversi
       page.drawPage(embedded, { x: slot.x + fitted.x, y: slot.y + fitted.y, width: fitted.width, height: fitted.height });
     }
   }
-  return { name: `${baseName}-handout.pdf`, blob: new Blob([toArrayBuffer(await output.save({ useObjectStreams: true }))], { type: "application/pdf" }) };
+  if (settings.metadata !== "Strip document details") {
+    output.setTitle(`${source.getTitle() || file.name} - handout`);
+    if (source.getAuthor()) output.setAuthor(source.getAuthor()!);
+    if (source.getSubject()) output.setSubject(source.getSubject()!);
+  } else {
+    output.setProducer("");
+    output.setCreator("");
+  }
+  const suffix = settings.batchNaming === "Clean filename" ? "" : "-handout";
+  return { name: `${baseName}${suffix}.pdf`, blob: new Blob([toArrayBuffer(await output.save({ useObjectStreams: true }))], { type: "application/pdf" }) };
 }
 
 async function extractPdfImages(file: File, baseName: string, settings: ConversionSettings) {
@@ -331,6 +349,10 @@ async function createSearchablePdf(file: File, baseName: string, settings: Conve
 }
 
 async function compressPdf(file: File, baseName: string, settings: ConversionSettings) {
+  if (/visual flattening/i.test(settings.compression ?? "")) {
+    return flattenPdfForCompression(file, baseName, settings);
+  }
+
   const { PDFDocument } = await import("pdf-lib");
   const pdf = await PDFDocument.load(await file.arrayBuffer(), { updateMetadata: false });
   if (settings.metadata?.includes("Strip")) {
@@ -338,64 +360,60 @@ async function compressPdf(file: File, baseName: string, settings: ConversionSet
     pdf.setAuthor("");
     pdf.setSubject("");
     pdf.setKeywords([]);
-    pdf.setProducer("Omni Converter");
-    pdf.setCreator("Omni Converter");
+    pdf.setProducer("");
+    pdf.setCreator("");
   }
   const bytes = await pdf.save({ useObjectStreams: true, addDefaultPage: false });
-  return { name: `${baseName}-compressed.pdf`, blob: new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }) };
+  const suffix = settings.batchNaming === "Clean filename" ? "" : "-optimized";
+  return { name: `${baseName}${suffix}.pdf`, blob: new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }) };
 }
 
-async function createVideoFrames(file: File, baseName: string, settings: ConversionSettings) {
-  const video = await loadVideo(file);
-  try {
-    const interval = frameIntervalSeconds(settings.frameInterval);
-    const times = timelineSamples(video.duration, interval, 120);
-    const outputs: ConversionOutput[] = [];
-    const mime = imageMimeFromSetting(settings.outputFormat);
-    const ext = extensionForImageMime(mime);
-    for (let index = 0; index < times.length; index += 1) {
-      await seekVideo(video, times[index]);
-      const canvas = videoFrameCanvas(video, pixelWidth(settings.resolution, video.videoWidth || 1280));
-      outputs.push({ name: `frames/${baseName}-frame-${String(index + 1).padStart(4, "0")}.${ext}`, blob: await canvasToBlob(canvas, mime, qualityFromCompression(settings.compression)) });
-    }
-    outputs.push(jsonOutput("manifest.json", { source: file.name, interval, frames: outputs.map((output) => output.name) }));
-    return zipOutputs(`${baseName}-frames.zip`, outputs);
-  } finally {
-    URL.revokeObjectURL(video.src);
-  }
-}
+async function flattenPdfForCompression(file: File, baseName: string, settings: ConversionSettings): Promise<ConversionOutput> {
+  const { PDFDocument } = await import("pdf-lib");
+  const sourceDetails = await PDFDocument.load(await file.arrayBuffer(), { updateMetadata: false });
+  const source = await loadPdf(file);
+  const output = await PDFDocument.create();
+  const smallest = /smallest/i.test(settings.compression ?? "");
+  const scale = (smallest ? 96 : 150) / 72;
+  const quality = smallest ? 0.52 : 0.76;
 
-async function createVideoContactSheet(file: File, baseName: string, _settings: ConversionSettings) {
-  const video = await loadVideo(file);
   try {
-    const columns = 4;
-    const rows = 3;
-    const cellWidth = 360;
-    const cellHeight = 220;
-    const canvas = document.createElement("canvas");
-    canvas.width = columns * cellWidth;
-    canvas.height = rows * cellHeight;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas is not available in this browser.");
-    context.fillStyle = "#111111";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    const times = timelineSamples(video.duration, video.duration / (columns * rows), columns * rows);
-    for (let index = 0; index < times.length; index += 1) {
-      await seekVideo(video, times[index]);
-      const x = (index % columns) * cellWidth;
-      const y = Math.floor(index / columns) * cellHeight;
-      const rect = coverRect(video.videoWidth || cellWidth, video.videoHeight || cellHeight, cellWidth, cellHeight);
-      context.drawImage(video, x + rect.x, y + rect.y, rect.width, rect.height);
-      context.fillStyle = "rgba(0,0,0,.62)";
-      context.fillRect(x, y + cellHeight - 28, cellWidth, 28);
-      context.fillStyle = "#fff7e8";
-      context.font = "14px system-ui";
-      context.fillText(formatTimestamp(times[index]), x + 10, y + cellHeight - 10);
+    for (let pageNumber = 1; pageNumber <= source.numPages; pageNumber += 1) {
+      const page = await source.getPage(pageNumber);
+      const viewport = page.getViewport({ scale });
+      const pageBox = page.getViewport({ scale: 1 });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const context = canvas.getContext("2d", { alpha: false });
+      if (!context) throw new Error("Canvas is not available in this browser.");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvas, canvasContext: context, viewport, background: "#ffffff" }).promise;
+      const image = await output.embedJpg(await (await canvasToBlob(canvas, "image/jpeg", quality)).arrayBuffer());
+      const outputPage = output.addPage([pageBox.width, pageBox.height]);
+      outputPage.drawImage(image, { x: 0, y: 0, width: pageBox.width, height: pageBox.height });
+      canvas.width = 1;
+      canvas.height = 1;
     }
-    return { name: `${baseName}-contact-sheet.png`, blob: await canvasToBlob(canvas, "image/png") };
   } finally {
-    URL.revokeObjectURL(video.src);
+    await source.cleanup();
   }
+
+  if (settings.metadata !== "Strip document details") {
+    if (sourceDetails.getTitle()) output.setTitle(sourceDetails.getTitle()!);
+    if (sourceDetails.getAuthor()) output.setAuthor(sourceDetails.getAuthor()!);
+    if (sourceDetails.getSubject()) output.setSubject(sourceDetails.getSubject()!);
+    const keywords = sourceDetails.getKeywords();
+    if (keywords) output.setKeywords(keywords.split(/[,;]\s*/).filter(Boolean));
+  } else {
+    output.setProducer("");
+    output.setCreator("");
+  }
+
+  const suffix = settings.batchNaming === "Clean filename" ? "" : "-optimized";
+  const bytes = await output.save({ useObjectStreams: true, addDefaultPage: false });
+  return { name: `${baseName}${suffix}.pdf`, blob: new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }) };
 }
 
 async function transcodeWithFfmpeg(file: File, baseName: string, extension: string, settings: ConversionSettings) {
@@ -406,48 +424,6 @@ async function transcodeWithFfmpeg(file: File, baseName: string, extension: stri
   return { name: `${baseName}.${extension}`, blob };
 }
 
-async function createWavAudio(file: File, baseName: string, settings: ConversionSettings) {
-  try {
-    const context = new AudioContext();
-    const buffer = await context.decodeAudioData(await file.arrayBuffer());
-    await context.close();
-    return { name: `${baseName}.wav`, blob: encodeWav(buffer, settings) };
-  } catch {
-    return transcodeWithFfmpeg(file, baseName, "wav", settings);
-  }
-}
-
-async function createWaveformPack(file: File, baseName: string, settings: ConversionSettings) {
-  const context = new AudioContext();
-  const buffer = await context.decodeAudioData(await file.arrayBuffer());
-  await context.close();
-  const peaks = waveformPeaks(buffer, 1200);
-  const svg = waveformSvg(peaks, file.name);
-  const png = await waveformPng(peaks, settings);
-  return zipOutputs(`${baseName}-waveform.zip`, [
-    { name: `${baseName}-waveform.svg`, blob: new Blob([svg], { type: "image/svg+xml;charset=utf-8" }) },
-    { name: `${baseName}-waveform.png`, blob: png },
-    jsonOutput("peaks.json", { source: file.name, duration: buffer.duration, sampleRate: buffer.sampleRate, peaks })
-  ]);
-}
-
-async function createAudioVideo(file: File, baseName: string, settings: ConversionSettings) {
-  const context = new AudioContext();
-  const buffer = await context.decodeAudioData(await file.arrayBuffer());
-  await context.close();
-  const fps = Math.min(60, Math.max(12, numberFromSetting(settings.frameRate, 30)));
-  const webm = await recordAudioWaveformWebm(file.name, buffer, settings, fps);
-  const output = (settings.outputFormat ?? "MP4").toLowerCase();
-  if (output.includes("webm")) return { name: `${baseName}.webm`, blob: webm };
-  return transcodeBlobWithFfmpeg(
-    webm,
-    "input.webm",
-    `${baseName}.mp4`,
-    ["-i", "input.webm", "-c:v", "libx264", "-preset", "slow", "-crf", crfFromCompression(settings.compression), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", audioBitrateFromCompression(settings.compression), "-shortest", "-movflags", "faststart", "output.mp4"],
-    "video/mp4"
-  );
-}
-
 async function spreadsheetRows(file: File) {
   if (/\.(xlsx|xls)$/i.test(file.name) || file.type.includes("spreadsheet") || file.type.includes("excel")) {
     const { readSheet } = await import("read-excel-file/browser");
@@ -455,20 +431,6 @@ async function spreadsheetRows(file: File) {
   }
   const text = await file.text();
   return parseDelimited(text, file.name.endsWith(".tsv") ? "\t" : ",");
-}
-
-async function spreadsheetToDelimited(file: File, baseName: string, settings: ConversionSettings) {
-  const rows = await spreadsheetRows(file);
-  const delimiter = settings.outputFormat?.includes("TSV") ? "\t" : settings.outputFormat?.includes("Pipe") ? "|" : ",";
-  const ext = delimiter === "\t" ? "tsv" : delimiter === "|" ? "txt" : "csv";
-  return textOutput(`${baseName}.${ext}`, rowsToCsv(rows, delimiter), delimiter === "\t" ? "text/tab-separated-values;charset=utf-8" : "text/csv;charset=utf-8");
-}
-
-async function spreadsheetToJson(file: File, baseName: string, settings: ConversionSettings) {
-  const rows = await spreadsheetRows(file);
-  const data = settings.outputFormat?.includes("Array of arrays") ? rows : rowsToObjects(rows);
-  if (settings.outputFormat?.includes("JSON Lines") && Array.isArray(data)) return textOutput(`${baseName}.jsonl`, data.map((row) => JSON.stringify(row)).join("\n"), "application/x-ndjson;charset=utf-8");
-  return jsonOutput(`${baseName}.json`, data);
 }
 
 async function spreadsheetChartPack(file: File, baseName: string, settings: ConversionSettings) {
@@ -482,83 +444,6 @@ async function spreadsheetChartPack(file: File, baseName: string, settings: Conv
   }
   outputs.push(jsonOutput("manifest.json", { source: file.name, charts: charts.map((chart) => chart.title) }));
   return zipOutputs(`${baseName}-charts.zip`, outputs);
-}
-
-async function transformStructuredData(file: File, baseName: string, settings: ConversionSettings) {
-  const text = await file.text();
-  const rows = structuredRows(text, file.name);
-  const target = settings.outputFormat ?? "JSON";
-  if (target.includes("CSV")) return textOutput(`${baseName}.csv`, rowsToCsv(rows), "text/csv;charset=utf-8");
-  if (target.includes("TSV")) return textOutput(`${baseName}.tsv`, rowsToCsv(rows, "\t"), "text/tab-separated-values;charset=utf-8");
-  if (target.includes("Markdown")) return textOutput(`${baseName}.md`, rowsToMarkdown(rows), "text/markdown;charset=utf-8");
-  if (target.includes("XML")) return textOutput(`${baseName}.xml`, rowsToXml(rows), "application/xml;charset=utf-8");
-  if (target.includes("YAML")) return textOutput(`${baseName}.yaml`, stringifyYaml(rowsToObjects(rows)), "application/yaml;charset=utf-8");
-  return jsonOutput(`${baseName}.json`, rowsToObjects(rows));
-}
-
-async function documentToMarkdown(file: File, baseName: string) {
-  if (/\.docx$/i.test(file.name)) {
-    const mammoth = await import("mammoth/mammoth.browser");
-    const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
-    return textOutput(`${baseName}.md`, `# ${escapeMarkdown(file.name)}\n\n${result.value.trim()}\n`, "text/markdown;charset=utf-8");
-  }
-  const text = await file.text();
-  return textOutput(`${baseName}.md`, `# ${escapeMarkdown(file.name)}\n\n${text.trim()}\n`, "text/markdown;charset=utf-8");
-}
-
-async function documentToHtml(file: File, baseName: string) {
-  if (/\.docx$/i.test(file.name)) {
-    const mammoth = await import("mammoth/mammoth.browser");
-    const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() }, { convertImage: mammoth.images.dataUri });
-    return htmlOutput(`${baseName}.html`, file.name, result.value);
-  }
-  const text = await file.text();
-  return htmlOutput(`${baseName}.html`, file.name, `<pre>${escapeHtml(text)}</pre>`);
-}
-
-async function presentationSlideImages(file: File, baseName: string, settings: ConversionSettings) {
-  const slides = await readPptxSlides(file);
-  const outputs: ConversionOutput[] = [];
-  const mime = imageMimeFromSetting(settings.outputFormat);
-  const ext = extensionForImageMime(mime);
-  for (let index = 0; index < slides.length; index += 1) {
-    const canvas = textCardCanvas(slides[index].title || `Slide ${index + 1}`, slides[index].text.join("\n"), 1920, 1080);
-    outputs.push({ name: `slides/${baseName}-slide-${String(index + 1).padStart(3, "0")}.${ext}`, blob: await canvasToBlob(canvas, mime, qualityFromCompression(settings.compression)) });
-  }
-  outputs.push(jsonOutput("outline.json", { source: file.name, slides }));
-  return zipOutputs(`${baseName}-slide-images.zip`, outputs);
-}
-
-async function presentationNotes(file: File, baseName: string, settings: ConversionSettings) {
-  const slides = await readPptxSlides(file);
-  if (settings.outputFormat?.includes("JSON")) return jsonOutput(`${baseName}-outline.json`, { source: file.name, slides });
-  const markdown = slides.map((slide, index) => `## Slide ${index + 1}: ${escapeMarkdown(slide.title || "")}\n\n${escapeMarkdown(slide.text.join("\n"))}`).join("\n\n");
-  if (settings.outputFormat?.includes("Markdown")) return textOutput(`${baseName}-notes.md`, `# ${escapeMarkdown(file.name)}\n\n${markdown}\n`, "text/markdown;charset=utf-8");
-  return textOutput(`${baseName}-notes.txt`, slides.map((slide, index) => `Slide ${index + 1}: ${slide.title}\n${slide.text.join("\n")}`).join("\n\n"), "text/plain;charset=utf-8");
-}
-
-async function extractArchive(file: File, baseName: string) {
-  const files = await unzipFile(await file.arrayBuffer());
-  const outputs = Object.entries(files).map(([name, bytes]) => ({ name: `extracted/${safeZipPath(name)}`, blob: new Blob([toArrayBuffer(bytes)]) }));
-  outputs.push(jsonOutput("manifest.json", { source: file.name, files: Object.keys(files) }));
-  return zipOutputs(`${baseName}-extracted.zip`, outputs);
-}
-
-async function repackArchive(file: File, baseName: string) {
-  const files = await unzipFile(await file.arrayBuffer());
-  const outputs = Object.entries(files)
-    .filter(([name]) => !name.includes("__MACOSX") && !name.endsWith(".DS_Store"))
-    .map(([name, bytes]) => ({ name: safeZipPath(name), blob: new Blob([toArrayBuffer(bytes)]) }));
-  outputs.push(jsonOutput("manifest.json", { source: file.name, files: outputs.map((output) => output.name) }));
-  return zipOutputs(`${baseName}-repacked.zip`, outputs);
-}
-
-async function extractZipAssets(file: File, baseName: string, folder: string) {
-  const files = await unzipFile(await file.arrayBuffer());
-  const assetEntries = Object.entries(files).filter(([name]) => /media|image|embeddings|assets|\.png$|\.jpe?g$|\.gif$|\.svg$/i.test(name));
-  const outputs = (assetEntries.length ? assetEntries : Object.entries(files)).map(([name, bytes]) => ({ name: `${folder}/${safeZipPath(name)}`, blob: new Blob([toArrayBuffer(bytes)]) }));
-  outputs.push(jsonOutput("manifest.json", { source: file.name, files: outputs.map((output) => output.name) }));
-  return zipOutputs(`${baseName}-${folder}.zip`, outputs);
 }
 
 async function fontWebPack(file: File, baseName: string) {
@@ -601,42 +486,6 @@ async function modelPreviewPack(file: File, baseName: string) {
   ]);
 }
 
-async function ebookToText(file: File, baseName: string, settings: ConversionSettings) {
-  const files = await unzipFile(await file.arrayBuffer());
-  const chapters = Object.entries(files)
-    .filter(([name]) => /\.(xhtml|html|htm)$/i.test(name))
-    .map(([name, bytes]) => ({ name, html: new TextDecoder().decode(bytes) }));
-  const chapterOutputs = chapters.map((chapter) => ({ name: safeZipPath(chapter.name.replace(/\.(xhtml|html|htm)$/i, ".txt")), text: htmlToText(chapter.html) }));
-  if (settings.outputFormat?.includes("HTML")) return htmlOutput(`${baseName}.html`, file.name, chapters.map((chapter) => chapter.html).join("\n"));
-  if (settings.outputFormat?.includes("Markdown")) return textOutput(`${baseName}.md`, chapterOutputs.map((chapter) => `## ${escapeMarkdown(chapter.name)}\n\n${chapter.text}`).join("\n\n"), "text/markdown;charset=utf-8");
-  if (settings.outputFormat?.includes("ZIP")) return zipOutputs(`${baseName}-chapters.zip`, chapterOutputs.map((chapter) => textOutput(chapter.name, chapter.text, "text/plain;charset=utf-8")));
-  return textOutput(`${baseName}.txt`, chapterOutputs.map((chapter) => `${chapter.name}\n\n${chapter.text}`).join("\n\n"), "text/plain;charset=utf-8");
-}
-
-async function compressApplicationPackage(file: File, baseName: string, settings: ConversionSettings) {
-  const originalBytes = new Uint8Array(await file.arrayBuffer());
-  const checksum = await sha256Hex(originalBytes);
-  const compression = settings.compression || "Maximum Deflate";
-  const manifest = {
-    source: file.name,
-    type: file.type || "application/octet-stream",
-    bytes: file.size,
-    compression,
-    sha256: checksum,
-    note: "Executable and installer files are preserved byte-for-byte inside the ZIP. Many application packages are already compressed, so size reduction depends on the source file."
-  };
-
-  return zipOutputs(
-    `${baseName}-compressed.zip`,
-    [
-      { name: `original/${safeZipPath(file.name)}`, blob: new Blob([toArrayBuffer(originalBytes)], { type: file.type || "application/octet-stream" }) },
-      jsonOutput("manifest.json", manifest),
-      textOutput("README.txt", `Compressed application package generated locally.\n\nSource: ${file.name}\nSHA-256: ${checksum}\nOriginal bytes: ${file.size}\nMode: ${compression}\n`, "text/plain;charset=utf-8")
-    ],
-    zipLevelFromCompression(settings.compression)
-  );
-}
-
 async function loadPdf(file: File) {
   const pdfjsLib = await import("pdfjs-dist");
   if (!pdfWorkerBlobUrl) {
@@ -647,11 +496,11 @@ async function loadPdf(file: File) {
   return pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
 }
 
-async function extractPdfText(file: File) {
+async function extractPdfText(file: File, selection?: string) {
   const pdf = await loadPdf(file);
   try {
     const pages: Array<{ pageNumber: number; text: string }> = [];
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    for (const pageNumber of selectPdfPageNumbers(pdf.numPages, selection)) {
       const page = await pdf.getPage(pageNumber);
       const textContent = await page.getTextContent();
       const text = textContent.items
@@ -738,37 +587,6 @@ function ffmpegArgs(inputName: string, outputName: string, extension: string, se
   return ["-i", inputName, outputName];
 }
 
-function encodeWav(buffer: AudioBuffer, settings: ConversionSettings) {
-  const gain = gainFromSetting(settings.audioGain);
-  const channels = Math.min(2, buffer.numberOfChannels);
-  const sampleRate = buffer.sampleRate;
-  const length = buffer.length * channels * 2;
-  const output = new ArrayBuffer(44 + length);
-  const view = new DataView(output);
-  writeString(view, 0, "RIFF");
-  view.setUint32(4, 36 + length, true);
-  writeString(view, 8, "WAVE");
-  writeString(view, 12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * channels * 2, true);
-  view.setUint16(32, channels * 2, true);
-  view.setUint16(34, 16, true);
-  writeString(view, 36, "data");
-  view.setUint32(40, length, true);
-  let offset = 44;
-  for (let index = 0; index < buffer.length; index += 1) {
-    for (let channel = 0; channel < channels; channel += 1) {
-      const value = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[index] * gain));
-      view.setInt16(offset, value < 0 ? value * 0x8000 : value * 0x7fff, true);
-      offset += 2;
-    }
-  }
-  return new Blob([output], { type: "audio/wav" });
-}
-
 function textOutput(name: string, text: string, type: string): ConversionOutput {
   return { name, blob: new Blob([text], { type }) };
 }
@@ -780,7 +598,7 @@ function jsonOutput(name: string, value: unknown): ConversionOutput {
 function htmlOutput(name: string, title: string, body: string): ConversionOutput {
   return textOutput(
     name,
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>body{margin:3rem auto;max-width:82ch;padding:0 1rem;font:16px/1.6 system-ui,sans-serif;color:#18120d;background:#fffaf0}img{max-width:100%;height:auto}</style></head><body>${body}</body></html>`,
+    sanitizeGeneratedHtml(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>body{margin:3rem auto;max-width:82ch;padding:0 1rem;font:16px/1.6 system-ui,sans-serif;color:#18120d;background:#fffaf0}img{max-width:100%;height:auto}</style></head><body>${body}</body></html>`),
     "text/html;charset=utf-8"
   );
 }
@@ -826,45 +644,6 @@ function aspectSize(value: string | undefined, fallback: "16:9" | "4:5") {
   if (selected.includes("9:16")) return { width: 9, height: 16 };
   if (selected.includes("4:3")) return { width: 4, height: 3 };
   return { width: 16, height: 9 };
-}
-
-function frameIntervalSeconds(value?: string) {
-  if (!value || value.includes("Every frame")) return 1;
-  return Math.max(0.2, numberFromSetting(value, 1));
-}
-
-function timelineSamples(duration: number, interval: number, cap: number) {
-  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 1;
-  const times: number[] = [];
-  for (let time = 0; time < safeDuration && times.length < cap; time += interval) times.push(Math.min(time, safeDuration - 0.05));
-  if (!times.length) times.push(0);
-  return times;
-}
-
-function formatTimestamp(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  const remaining = Math.floor(seconds % 60).toString().padStart(2, "0");
-  return `${minutes}:${remaining}`;
-}
-
-function imageMimeFromSetting(value?: string): "image/png" | "image/jpeg" | "image/webp" {
-  if (value?.includes("JPEG")) return "image/jpeg";
-  if (value?.includes("WebP")) return "image/webp";
-  return "image/png";
-}
-
-function extensionForImageMime(mime: string) {
-  if (mime === "image/jpeg") return "jpg";
-  if (mime === "image/webp") return "webp";
-  return "png";
-}
-
-function audioExtension(value?: string) {
-  if (value?.includes("WAV")) return "wav";
-  if (value?.includes("AAC")) return "aac";
-  if (value?.includes("M4A")) return "m4a";
-  if (value?.includes("OGG")) return "ogg";
-  return "mp3";
 }
 
 function mimeForExtension(extension: string) {
@@ -915,128 +694,6 @@ async function recordImageMotionWebm(file: File, duration: number, fps: number) 
   return new Blob(chunks, { type: "video/webm" });
 }
 
-async function recordAudioWaveformWebm(title: string, buffer: AudioBuffer, settings: ConversionSettings, fps: number) {
-  const size = audioVideoSize(settings.aspectRatio, settings.resolution);
-  const canvas = document.createElement("canvas");
-  canvas.width = size.width;
-  canvas.height = size.height;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Canvas is not available in this browser.");
-
-  const peaks = waveformPeaks(buffer, 220);
-  const canvasStream = canvas.captureStream(fps);
-  const playback = new AudioContext();
-  const source = playback.createBufferSource();
-  const gain = playback.createGain();
-  const destination = playback.createMediaStreamDestination();
-  source.buffer = buffer;
-  gain.gain.value = gainFromSetting(settings.audioGain);
-  source.connect(gain).connect(destination);
-
-  const stream = new MediaStream([...canvasStream.getVideoTracks(), ...destination.stream.getAudioTracks()]);
-  const mimeType = audioVideoRecorderMime();
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  const chunks: Blob[] = [];
-  recorder.ondataavailable = (event) => {
-    if (event.data.size) chunks.push(event.data);
-  };
-
-  drawAudioVideoFrame(context, canvas, peaks, 0, title, buffer.duration, settings);
-  recorder.start(250);
-  await playback.resume();
-  const startedAt = playback.currentTime;
-  const ended = new Promise<void>((resolve) => {
-    source.onended = () => resolve();
-  });
-  source.start();
-
-  await Promise.all([
-    ended,
-    new Promise<void>((resolve) => {
-      const render = () => {
-        const elapsed = playback.currentTime - startedAt;
-        const progress = Math.min(1, elapsed / Math.max(0.01, buffer.duration));
-        drawAudioVideoFrame(context, canvas, peaks, progress, title, buffer.duration, settings);
-        if (progress < 1) {
-          window.requestAnimationFrame(render);
-        } else {
-          resolve();
-        }
-      };
-      window.requestAnimationFrame(render);
-    })
-  ]);
-
-  await new Promise<void>((resolve) => {
-    recorder.onstop = () => resolve();
-    recorder.stop();
-  });
-  stream.getTracks().forEach((track) => track.stop());
-  await playback.close();
-  return new Blob(chunks, { type: "video/webm" });
-}
-
-function audioVideoRecorderMime() {
-  return ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((mime) => MediaRecorder.isTypeSupported(mime));
-}
-
-function audioVideoSize(aspectRatio: string | undefined, resolution: string | undefined) {
-  const ratio = aspectSize(aspectRatio, "16:9");
-  const width = pixelWidth(resolution, 1920);
-  return {
-    width,
-    height: Math.max(1, Math.round((width * ratio.height) / ratio.width))
-  };
-}
-
-function drawAudioVideoFrame(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, peaks: number[], progress: number, title: string, duration: number, settings: ConversionSettings) {
-  const width = canvas.width;
-  const height = canvas.height;
-  const padding = Math.max(40, Math.round(width * 0.055));
-  const name = title.replace(/\.[^.]+$/, "");
-  const animated = !settings.waveform?.includes("Static");
-  const activeProgress = animated ? progress : 1;
-  const gradient = context.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, "#17110d");
-  gradient.addColorStop(0.55, "#0d1713");
-  gradient.addColorStop(1, "#050505");
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, width, height);
-
-  context.strokeStyle = "rgba(224, 190, 112, 0.42)";
-  context.lineWidth = Math.max(2, width / 760);
-  context.strokeRect(padding * 0.55, padding * 0.55, width - padding * 1.1, height - padding * 1.1);
-
-  context.fillStyle = "#fff7e8";
-  context.font = `700 ${Math.max(28, Math.round(width / 28))}px Georgia, serif`;
-  context.textAlign = "center";
-  context.fillText(name.slice(0, 72), width / 2, padding * 1.55);
-
-  const waveTop = height * 0.34;
-  const waveHeight = height * 0.34;
-  const barGap = Math.max(1, width / 760);
-  const barWidth = Math.max(2, (width - padding * 2) / peaks.length - barGap);
-  peaks.forEach((peak, index) => {
-    const x = padding + index * (barWidth + barGap);
-    const barHeight = Math.max(3, peak * waveHeight);
-    const isActive = index / peaks.length <= activeProgress;
-    context.fillStyle = isActive ? "#f4d98f" : "rgba(255, 247, 232, 0.24)";
-    context.fillRect(x, waveTop + (waveHeight - barHeight) / 2, barWidth, barHeight);
-  });
-
-  const progressY = height - padding * 1.7;
-  context.fillStyle = "rgba(255, 247, 232, 0.22)";
-  context.fillRect(padding, progressY, width - padding * 2, Math.max(4, height / 170));
-  context.fillStyle = "#d7b76d";
-  context.fillRect(padding, progressY, (width - padding * 2) * progress, Math.max(4, height / 170));
-  context.fillStyle = "rgba(255, 247, 232, 0.82)";
-  context.font = `500 ${Math.max(14, Math.round(width / 86))}px system-ui, sans-serif`;
-  context.textAlign = "left";
-  context.fillText(formatTimestamp(progress * duration), padding, progressY + padding * 0.72);
-  context.textAlign = "right";
-  context.fillText(formatTimestamp(duration), width - padding, progressY + padding * 0.72);
-}
-
 function handoutSlots(width: number, height: number, margin: number, count: number) {
   if (count === 4) {
     const slotWidth = (width - margin * 3) / 2;
@@ -1054,97 +711,6 @@ function handoutSlots(width: number, height: number, margin: number, count: numb
     { x: margin, y: margin + slotHeight + margin, width: slotWidth, height: slotHeight },
     { x: margin, y: margin, width: slotWidth, height: slotHeight }
   ];
-}
-
-async function loadVideo(file: File) {
-  const url = URL.createObjectURL(file);
-  const video = document.createElement("video");
-  video.preload = "metadata";
-  video.muted = true;
-  video.src = url;
-  await new Promise<void>((resolve, reject) => {
-    video.onloadedmetadata = () => resolve();
-    video.onerror = () => reject(new Error("This video could not be decoded by the browser."));
-  });
-  return video;
-}
-
-function seekVideo(video: HTMLVideoElement, time: number) {
-  return new Promise<void>((resolve) => {
-    video.onseeked = () => resolve();
-    video.currentTime = Math.min(Math.max(0, time), Math.max(0, (video.duration || 0) - 0.05));
-  });
-}
-
-function videoFrameCanvas(video: HTMLVideoElement, targetWidth: number) {
-  const width = targetWidth;
-  const height = Math.max(1, Math.round((width / (video.videoWidth || width)) * (video.videoHeight || width)));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Canvas is not available in this browser.");
-  context.drawImage(video, 0, 0, width, height);
-  return canvas;
-}
-
-function gainFromSetting(value?: string) {
-  if (!value) return 1;
-  if (value.includes("-6")) return 0.5;
-  if (value.includes("-3")) return 0.707;
-  if (value.includes("+3")) return 1.414;
-  if (value.includes("+6")) return 2;
-  if (value.includes("Mute")) return 0;
-  return 1;
-}
-
-function writeString(view: DataView, offset: number, value: string) {
-  for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index));
-}
-
-function waveformPeaks(buffer: AudioBuffer, points: number) {
-  const data = buffer.getChannelData(0);
-  const block = Math.max(1, Math.floor(data.length / points));
-  const peaks: number[] = [];
-  for (let index = 0; index < points; index += 1) {
-    let peak = 0;
-    for (let sample = 0; sample < block; sample += 1) peak = Math.max(peak, Math.abs(data[index * block + sample] ?? 0));
-    peaks.push(Number(peak.toFixed(4)));
-  }
-  return peaks;
-}
-
-function waveformSvg(peaks: number[], title: string) {
-  const width = 1200;
-  const height = 360;
-  const bars = peaks
-    .map((peak, index) => {
-      const x = (index / peaks.length) * width;
-      const h = Math.max(2, peak * (height - 60));
-      return `<rect x="${x.toFixed(2)}" y="${((height - h) / 2).toFixed(2)}" width="${Math.max(1, width / peaks.length).toFixed(2)}" height="${h.toFixed(2)}" rx="1" fill="#f3dc9d"/>`;
-    })
-    .join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#0b0b0b"/><title>${escapeHtml(title)}</title>${bars}</svg>`;
-}
-
-async function waveformPng(peaks: number[], settings: ConversionSettings) {
-  const width = pixelWidth(settings.resolution, 1200);
-  const height = Math.round(width * 0.3);
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Canvas is not available in this browser.");
-  context.fillStyle = "#0b0b0b";
-  context.fillRect(0, 0, width, height);
-  context.fillStyle = settings.color?.includes("Grayscale") ? "#f5f5f5" : "#f3dc9d";
-  peaks.forEach((peak, index) => {
-    const x = (index / peaks.length) * width;
-    const barWidth = Math.max(1, width / peaks.length);
-    const barHeight = Math.max(2, peak * (height - 32));
-    context.fillRect(x, (height - barHeight) / 2, barWidth, barHeight);
-  });
-  return canvasToBlob(canvas, "image/png");
 }
 
 function createChartsFromRows(rows: unknown[][]) {
@@ -1185,63 +751,6 @@ async function svgToPng(svg: string, width: number, height: number) {
   const blob = new Blob([svg], { type: "image/svg+xml" });
   const image = await renderImage(blob, { width, height, fit: "cover" });
   return canvasToBlob(image, "image/png");
-}
-
-function structuredRows(text: string, name: string): unknown[][] {
-  const trimmed = text.trim();
-  if (name.endsWith(".json") || trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    const value = JSON.parse(trimmed);
-    const rows = Array.isArray(value) ? value : [value];
-    if (rows.every((row) => row && typeof row === "object" && !Array.isArray(row))) {
-      const keys = Array.from(new Set(rows.flatMap((row) => Object.keys(row as Record<string, unknown>))));
-      return [keys, ...rows.map((row) => keys.map((key) => (row as Record<string, unknown>)[key] ?? ""))];
-    }
-    return rows.map((row) => (Array.isArray(row) ? row : [row]));
-  }
-  if (name.endsWith(".tsv")) return parseDelimited(text, "\t");
-  return parseDelimited(text, ",");
-}
-
-function rowsToXml(rows: unknown[][]) {
-  const objects = rowsToObjects(rows);
-  return `<rows>${objects.map((row) => `<row>${Object.entries(row).map(([key, value]) => `<${key}>${escapeHtml(String(value))}</${key}>`).join("")}</row>`).join("")}</rows>`;
-}
-
-async function unzipFile(buffer: ArrayBuffer) {
-  const { unzipSync } = await import("fflate");
-  return unzipSync(new Uint8Array(buffer));
-}
-
-async function readPptxSlides(file: File) {
-  const { unzipSync } = await import("fflate");
-  const files = unzipSync(new Uint8Array(await file.arrayBuffer()));
-  const slideNames = Object.keys(files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).sort((a, b) => numberFromSetting(a, 0) - numberFromSetting(b, 0));
-  return slideNames.map((name, index) => {
-    const xml = new TextDecoder().decode(files[name]);
-    const text = extractXmlText(xml);
-    return { number: index + 1, title: text[0] ?? `Slide ${index + 1}`, text };
-  });
-}
-
-function extractXmlText(xml: string) {
-  return Array.from(xml.matchAll(/<a:t[^>]*>(.*?)<\/a:t>|<t[^>]*>(.*?)<\/t>/g))
-    .map((match) => decodeXml(match[1] ?? match[2] ?? ""))
-    .filter(Boolean);
-}
-
-function decodeXml(value: string) {
-  return value.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
-}
-
-function safeZipPath(name: string) {
-  return name.replace(/^[a-z]+:\/+/i, "").replace(/\.\.+/g, ".").replace(/^\/+/, "");
-}
-
-async function sha256Hex(bytes: Uint8Array) {
-  const hash = await crypto.subtle.digest("SHA-256", toArrayBuffer(bytes));
-  return Array.from(new Uint8Array(hash))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function fontFormat(ext: string) {
@@ -1292,43 +801,92 @@ function specimenSvg(name: string, family: string) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100"><rect width="100%" height="100%" fill="#0b0b0b"/><text x="80" y="160" fill="#fffaf0" font-size="96" font-family="${escapeHtml(family)}">${escapeHtml(name)}</text><text x="80" y="330" fill="#d7b76d" font-size="64" font-family="${escapeHtml(family)}">ABCDEFGHIJKLMNOPQRSTUVWXYZ</text><text x="80" y="460" fill="#d7b76d" font-size="64" font-family="${escapeHtml(family)}">abcdefghijklmnopqrstuvwxyz</text><text x="80" y="590" fill="#d7b76d" font-size="64" font-family="${escapeHtml(family)}">0123456789</text></svg>`;
 }
 
-function htmlToText(html: string) {
-  return decodeXml(html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")).trim();
-}
-
-function createPptxFiles(sourceName: string, slides: Array<{ title: string; body: string }>): ConversionOutput[] {
+function createPptxFiles(sourceName: string | undefined, slides: Array<{ title: string; body: string }>): ConversionOutput[] {
   const slideFiles = slides.flatMap((slide, index) => {
     const number = index + 1;
     return [
       textOutput(`ppt/slides/slide${number}.xml`, slideXml(slide.title, slide.body), "application/xml"),
-      textOutput(`ppt/slides/_rels/slide${number}.xml.rels`, `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`, "application/xml")
+      textOutput(`ppt/slides/_rels/slide${number}.xml.rels`, relationshipsXml([
+        { id: "rId1", type: "slideLayout", target: "../slideLayouts/slideLayout1.xml" }
+      ]), "application/xml")
     ];
   });
   return [
     textOutput("[Content_Types].xml", contentTypesXml(slides.length), "application/xml"),
-    textOutput("_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>`, "application/xml"),
+    textOutput("_rels/.rels", relationshipsXml([{ id: "rId1", type: "officeDocument", target: "ppt/presentation.xml" }]), "application/xml"),
     textOutput("ppt/presentation.xml", presentationXml(slides.length), "application/xml"),
     textOutput("ppt/_rels/presentation.xml.rels", presentationRelsXml(slides.length), "application/xml"),
-    textOutput("ppt/props/source.txt", `Generated from ${sourceName}`, "text/plain"),
+    textOutput("ppt/presProps.xml", presentationPropertiesXml(), "application/xml"),
+    textOutput("ppt/slideMasters/slideMaster1.xml", slideMasterXml(), "application/xml"),
+    textOutput("ppt/slideMasters/_rels/slideMaster1.xml.rels", relationshipsXml([
+      { id: "rId1", type: "slideLayout", target: "../slideLayouts/slideLayout1.xml" },
+      { id: "rId2", type: "theme", target: "../theme/theme1.xml" }
+    ]), "application/xml"),
+    textOutput("ppt/slideLayouts/slideLayout1.xml", slideLayoutXml(), "application/xml"),
+    textOutput("ppt/slideLayouts/_rels/slideLayout1.xml.rels", relationshipsXml([
+      { id: "rId1", type: "slideMaster", target: "../slideMasters/slideMaster1.xml" }
+    ]), "application/xml"),
+    textOutput("ppt/theme/theme1.xml", themeXml(), "application/xml"),
+    ...(sourceName ? [textOutput("ppt/props/source.txt", `Generated from ${sourceName}`, "text/plain")] : []),
     ...slideFiles
   ];
 }
 
 function contentTypesXml(count: number) {
   const slides = Array.from({ length: count }, (_, index) => `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join("");
-  return `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>${slides}</Types>`;
+  return `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="txt" ContentType="text/plain"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/presProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presProps+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>${slides}</Types>`;
 }
 
 function presentationXml(count: number) {
-  const ids = Array.from({ length: count }, (_, index) => `<p:sldId id="${256 + index}" r:id="rId${index + 1}"/>`).join("");
-  return `<?xml version="1.0" encoding="UTF-8"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:sldIdLst>${ids}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000" type="screen16x9"/></p:presentation>`;
+  const ids = Array.from({ length: count }, (_, index) => `<p:sldId id="${256 + index}" r:id="rId${index + 2}"/>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst>${ids}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000" type="screen16x9"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`;
 }
 
 function presentationRelsXml(count: number) {
-  const rels = Array.from({ length: count }, (_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${index + 1}.xml"/>`).join("");
-  return `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`;
+  return relationshipsXml([
+    { id: "rId1", type: "slideMaster", target: "slideMasters/slideMaster1.xml" },
+    ...Array.from({ length: count }, (_, index) => ({ id: `rId${index + 2}`, type: "slide", target: `slides/slide${index + 1}.xml` })),
+    { id: `rId${count + 2}`, type: "presProps", target: "presProps.xml" }
+  ]);
 }
 
 function slideXml(title: string, body: string) {
-  return `<?xml version="1.0" encoding="UTF-8"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="3600"/><a:t>${escapeHtml(title)}</a:t></a:r></a:p><a:p><a:r><a:rPr sz="1800"/><a:t>${escapeHtml(body.slice(0, 2000))}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`;
+  return `<?xml version="1.0" encoding="UTF-8"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree>${groupShapeXml()}${textShapeXml(2, "Title", "title", title, 457200, 274320, 11277600, 1143000, 3600)}${textShapeXml(3, "Body", "body", body.slice(0, 12000), 685800, 1828800, 10820400, 4114800, 1800)}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
+}
+
+function relationshipsXml(items: Array<{ id: string; type: string; target: string }>) {
+  const relationships = items.map((item) => `<Relationship Id="${item.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${item.type}" Target="${item.target}"/>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships}</Relationships>`;
+}
+
+function presentationPropertiesXml() {
+  return `<?xml version="1.0" encoding="UTF-8"?><p:presentationPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`;
+}
+
+function groupShapeXml() {
+  return `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>`;
+}
+
+function emptyShapeTreeXml() {
+  return `<p:spTree>${groupShapeXml()}</p:spTree>`;
+}
+
+function textShapeXml(id: number, name: string, placeholder: "title" | "body", text: string, x: number, y: number, width: number, height: number, size: number) {
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr><p:ph type="${placeholder}"${placeholder === "body" ? ' idx="1"' : ""}/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${width}" cy="${height}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square"/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="${size}"/><a:t>${escapeXmlText(text)}</a:t></a:r><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp>`;
+}
+
+function escapeXmlText(value: string) {
+  return escapeHtml(value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ""));
+}
+
+function slideMasterXml() {
+  return `<?xml version="1.0" encoding="UTF-8"?><p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld name="Omni Outline Master">${emptyShapeTreeXml()}</p:cSld><p:clrMap accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" bg1="lt1" bg2="lt2" folHlink="folHlink" hlink="hlink" tx1="dk1" tx2="dk2"/><p:sldLayoutIdLst><p:sldLayoutId id="1" r:id="rId1"/></p:sldLayoutIdLst><p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle/></p:txStyles></p:sldMaster>`;
+}
+
+function slideLayoutXml() {
+  return `<?xml version="1.0" encoding="UTF-8"?><p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="obj" preserve="1"><p:cSld name="Title and Content">${emptyShapeTreeXml()}</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>`;
+}
+
+function themeXml() {
+  return `<?xml version="1.0" encoding="UTF-8"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Omni Outline"><a:themeElements><a:clrScheme name="Omni"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F1F1F"/></a:dk2><a:lt2><a:srgbClr val="F4F1E8"/></a:lt2><a:accent1><a:srgbClr val="B69045"/></a:accent1><a:accent2><a:srgbClr val="366F5A"/></a:accent2><a:accent3><a:srgbClr val="8E4545"/></a:accent3><a:accent4><a:srgbClr val="526A91"/></a:accent4><a:accent5><a:srgbClr val="7B638E"/></a:accent5><a:accent6><a:srgbClr val="3F7C82"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme><a:fontScheme name="Omni"><a:majorFont><a:latin typeface="Aptos Display"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Aptos"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="Omni"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"><a:tint val="50000"/></a:schemeClr></a:solidFill><a:solidFill><a:schemeClr val="phClr"><a:shade val="50000"/></a:schemeClr></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="6350"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="12700"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="19050"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"><a:tint val="50000"/></a:schemeClr></a:solidFill><a:solidFill><a:schemeClr val="phClr"><a:shade val="50000"/></a:schemeClr></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>`;
 }

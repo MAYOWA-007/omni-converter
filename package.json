@@ -12,7 +12,11 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:bundle": "node scripts/check-entry-bundle.mjs",
+    "test:unit": "playwright test --config playwright.unit.config.ts",
+    "test:e2e": "playwright test --config playwright.config.ts",
+    "test:pwa": "playwright test --config playwright.pwa.config.ts"
   },
   "dependencies": {
     "@ffmpeg/core": "^0.12.9",

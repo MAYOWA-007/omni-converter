@@ -1,6 +1,10 @@
 {
+  "id": "/omni-converter/",
   "name": "Omni Converter",
   "short_name": "Omni",
+  "description": "Convert, compress, inspect, and package files in a focused browser workflow.",
+  "start_url": "/omni-converter/",
+  "scope": "/omni-converter/",
   "icons": [
     {
       "src": "/omni-converter/android-chrome-192x192.png",
@@ -17,5 +21,44 @@
   ],
   "theme_color": "#090a0b",
   "background_color": "#090a0b",
-  "display": "standalone"
+  "display": "standalone",
+  "orientation": "any",
+  "categories": ["utilities", "productivity"],
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "file_handlers": [
+    {
+      "action": "/omni-converter/",
+      "accept": {
+        "application/pdf": [".pdf"],
+        "application/json": [".json"],
+        "application/zip": [".zip"],
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
+        "text/plain": [".txt"],
+        "text/csv": [".csv"],
+        "text/markdown": [".md", ".markdown"],
+        "text/html": [".html", ".htm"],
+        "image/png": [".png"],
+        "image/jpeg": [".jpg", ".jpeg"],
+        "image/gif": [".gif"],
+        "image/webp": [".webp"],
+        "image/avif": [".avif"],
+        "image/svg+xml": [".svg"],
+        "audio/mpeg": [".mp3"],
+        "audio/wav": [".wav"],
+        "audio/ogg": [".ogg", ".oga"],
+        "audio/mp4": [".m4a"],
+        "video/mp4": [".mp4", ".m4v"],
+        "video/webm": [".webm"],
+        "video/quicktime": [".mov"],
+        "font/ttf": [".ttf"],
+        "font/otf": [".otf"],
+        "font/woff": [".woff"],
+        "font/woff2": [".woff2"]
+      }
+    }
+  ]
 }

@@ -1,30 +1,28 @@
 # Omni Converter
 
-A browser-based file conversion interface. Drop a file, choose a practical output, tune the settings, and download the result.
+Omni Converter is a browser-based file conversion and editing application. Files are inspected, transformed, previewed, and packaged on the user's device without an upload or cloud conversion service.
 
-## Current Scope
+## Verified Conversions
 
-- React + Vite + TypeScript app.
-- Drag-and-drop file inspection.
-- Smart conversion search with format aliases.
-- Image outputs for PDF, PNG, JPEG, WebP, AVIF, BMP, SVG wrapper, data URI, HTML embed, thumbnail ZIP, favicon ZIP, and format ZIP.
-- Browser capability checks for export formats before conversion starts.
+- Images: raster formats, resizing, compression, PDF, animation, thumbnails, social packs, and icon bundles.
+- PDFs: page images, text, Markdown, HTML, DOCX, PPTX outlines, metadata, handouts, carousels, splitting, rotation, and bounded compression.
+- Data: XLSX, CSV, TSV, JSON, JSON Lines, HTML, Markdown, and PDF derivatives.
+- Documents: verified DOCX and PPTX semantic extraction plus media bundles.
+- Archives and ebooks: bounded ZIP operations and verified EPUB conversions.
+- Media: MP4/WebM transcoding, frame and contact-sheet exports, audio extraction, audio transcoding, waveforms, and audio-to-video.
 
-## Commands
+Every selectable route is backed by a registered browser engine and executable fixture coverage. Unsupported or misleading routes stay unavailable.
+
+## Development
 
 ```powershell
 npm install
 npm run dev
-npm run typecheck
-npm run build
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-omni.ps1 -Public
 ```
 
-## GitHub Pages
+The public verification command runs a sensitive-content scan, typecheck, production build, entry-bundle budget, unit contracts, browser workflows, and offline PWA checks.
 
-This repo is configured for GitHub Pages at:
+## Live App
 
-```text
-https://mayowa-007.github.io/omni-converter/
-```
-
-The Vite base path is `/omni-converter/`.
+[mayowa-007.github.io/omni-converter](https://mayowa-007.github.io/omni-converter/)

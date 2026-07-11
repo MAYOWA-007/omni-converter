@@ -1,27 +1,56 @@
-import { canConvertImageRecipe, convertImageRecipe, downloadOutput, type ConversionOutput } from "./imageConversions";
-import { canConvertPdfRecipe, convertPdfRecipe } from "./pdfConversions";
-import { canConvertAdvancedRecipe, convertAdvancedRecipe } from "./advancedConversions";
-import type { ConversionRecipe, ConversionSettings, FileInspection } from "./types";
+import { legacyEngines } from "../engines/legacyAdapter";
+import { engineForRecipe, registerEngine } from "../engines/registry";
+import type { EngineProgressReporter } from "../engines/types";
+import { deriveRecipeAvailability } from "../core/catalog";
+import { saveOutput, saveOutputBundle } from "../core/export";
+import type { ConversionOutput } from "./imageConversions";
+import type { ConversionRecipe, ConversionSettings, FileInspection, RecipeRuntime } from "./types";
 
-export { downloadOutput };
+export { saveOutput, saveOutputBundle };
 export type { ConversionOutput };
 
-export function canRunRecipe(recipe: ConversionRecipe) {
-  return recipe.implementation === "ready" && (canConvertImageRecipe(recipe) || canConvertPdfRecipe(recipe) || canConvertAdvancedRecipe(recipe));
+export interface ConversionExecutionContext {
+  signal?: AbortSignal;
+  reportProgress?: EngineProgressReporter;
 }
 
-export async function convertRecipe(file: File, inspection: FileInspection, recipe: ConversionRecipe, settings: ConversionSettings = {}): Promise<ConversionOutput[]> {
-  if (canConvertImageRecipe(recipe)) {
-    return convertImageRecipe(file, inspection, recipe, settings);
+const noopProgress: EngineProgressReporter = () => {};
+
+for (const engine of legacyEngines) {
+  registerEngine(engine);
+}
+
+export function canRunRecipe(recipe: ConversionRecipe, runtime: RecipeRuntime = "browser") {
+  if (recipe.implementation !== "ready" || !deriveRecipeAvailability(recipe, runtime).selectable) {
+    return false;
   }
 
-  if (canConvertPdfRecipe(recipe)) {
-    return convertPdfRecipe(file, inspection, recipe, settings);
+  try {
+    engineForRecipe(recipe, runtime);
+    return true;
+  } catch {
+    return false;
   }
+}
 
-  if (canConvertAdvancedRecipe(recipe)) {
-    return convertAdvancedRecipe(file, inspection, recipe, settings);
-  }
+export async function convertRecipe(
+  file: File,
+  inspection: FileInspection,
+  recipe: ConversionRecipe,
+  settings: ConversionSettings = {},
+  execution: ConversionExecutionContext | AbortSignal = {}
+): Promise<ConversionOutput[]> {
+  const { signal, reportProgress } = normalizeExecutionContext(execution);
+  return engineForRecipe(recipe).convert({
+    file,
+    inspection,
+    recipe,
+    settings,
+    signal: signal ?? new AbortController().signal,
+    reportProgress: reportProgress ?? noopProgress
+  });
+}
 
-  throw new Error("This converter is not available yet.");
+function normalizeExecutionContext(execution: ConversionExecutionContext | AbortSignal) {
+  return "aborted" in execution ? { signal: execution } : execution;
 }

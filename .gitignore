@@ -3,6 +3,9 @@ dist/
 .vite/
 output/
 test-artifacts/
+test-results/
+playwright-report/
+.superpowers/
 *.local
 .env
 .env.*

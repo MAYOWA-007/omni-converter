@@ -1,4 +1,12 @@
-import type { ConversionRecipe, EditorControl, FileFamily } from "../lib/types";
+import type { ConversionImplementation, ConversionRecipe, EditorControl, FileFamily, RecipeMaturity, RecipeRuntime } from "../lib/types";
+import { PDF_PAGE_SELECTION_OPTIONS } from "../lib/pdfPageSelection";
+import { VERIFIED_IMAGE_RECIPE_IDS } from "./verifiedImageRecipes";
+import { VERIFIED_PDF_RECIPE_IDS } from "./verifiedPdfRecipes";
+import { VERIFIED_TABULAR_RECIPE_IDS } from "./verifiedTabularRecipes";
+import { VERIFIED_OFFICE_RECIPE_IDS } from "./verifiedOfficeRecipes";
+import { VERIFIED_ARCHIVE_RECIPE_IDS } from "./verifiedArchiveRecipes";
+import { VERIFIED_EBOOK_RECIPE_IDS } from "./verifiedEbookRecipes";
+import { VERIFIED_MEDIA_RECIPE_IDS } from "./verifiedMediaRecipes";
 
 export const FAMILY_LABELS: Record<FileFamily, string> = {
   image: "Image",
@@ -19,10 +27,12 @@ export const FAMILY_LABELS: Record<FileFamily, string> = {
 };
 
 export const DEFAULT_CONTROL_OPTIONS: Record<EditorControl, string[]> = {
+  archiveSelection: ["All files", "Top-level files", "Documents", "Images", "Audio and video"],
   outputFormat: ["Auto", "PNG", "JPEG", "WebP", "AVIF", "PDF", "TXT", "Markdown", "HTML", "ZIP"],
   timeline: ["Full file", "Marked range", "Current clip", "Intro only", "Outro only", "Custom marks"],
   trim: ["None", "Start/end handles", "First 5 seconds", "First 15 seconds", "First 30 seconds", "Custom range"],
   crop: ["None", "Fit entire source", "Fill target", "Center crop", "Trim transparent edges", "Safe social crop", "Custom crop"],
+  rotation: ["90 degrees clockwise", "180 degrees", "90 degrees counterclockwise"],
   aspectRatio: ["Original", "1:1 square", "4:5 portrait", "5:4 landscape", "16:9 widescreen", "9:16 vertical", "3:2 photo", "2:3 portrait", "A4 page", "Letter page", "Custom"],
   resolution: ["Original", "512 px", "1024 px", "1080 px", "1920 px", "2K", "4K", "150 DPI", "300 DPI", "Custom"],
   frameRate: ["Source", "12 fps", "15 fps", "24 fps", "25 fps", "30 fps", "60 fps", "Custom"],
@@ -30,12 +40,21 @@ export const DEFAULT_CONTROL_OPTIONS: Record<EditorControl, string[]> = {
   chapterInterval: ["None", "Every minute", "Every 2 minutes", "Every 5 minutes", "Detected chapters", "Scene breaks", "Custom chapter marks"],
   audioGain: ["Keep source", "Normalize", "-6 dB", "-3 dB", "+3 dB", "+6 dB", "Mute", "Custom"],
   audioFade: ["None", "Fade in", "Fade out", "Fade in and out", "Crossfade clips", "Custom"],
+  sampleRate: ["Source sample rate", "44.1 kHz", "48 kHz", "96 kHz"],
+  audioChannels: ["Source channels", "Mono", "Stereo"],
+  bitDepth: ["16-bit PCM", "24-bit PCM", "32-bit float"],
   waveform: ["None", "PNG waveform", "SVG waveform", "Audiogram background", "Timeline peaks JSON"],
   captions: ["None", "Import SRT", "Import VTT", "Export SRT", "Export VTT", "Burn in later", "Transcript package"],
   color: ["Original", "sRGB", "Display P3", "Grayscale", "CMYK prep", "Transparent matte", "White matte", "Black matte"],
   compression: ["Lossless", "Maximum quality", "High quality", "Balanced", "Small file", "Tiny preview", "Custom"],
+  dataTypes: ["Preserve detected types", "Infer CSV value types", "Convert all values to text"],
+  formulaSafety: ["Protect spreadsheet formulas", "Preserve exact text"],
+  headerMode: ["First row is headers", "No header row"],
   pageOrder: ["All pages", "Current page", "First page", "Last page", "Odd pages", "Even pages", "Custom range", "Split every page", "Reverse order"],
+  pageLayout: ["2 pages per sheet", "4 pages per sheet"],
   pageSize: ["Auto", "Original", "Letter", "Legal", "A4", "A5", "16:9 slide", "4:5 carousel", "1:1 square", "Custom"],
+  sheetSelection: ["All sheets", "First sheet"],
+  slideSelection: ["All slides", "First slide", "Last slide", "Odd slides", "Even slides", "Reverse order"],
   margins: ["None", "Narrow", "Standard", "Wide", "Bleed", "Safe area", "Custom"],
   metadata: ["Keep", "Strip", "Inspect report", "Normalize", "Rename title", "Replace author/company", "Redact hidden fields"],
   watermark: ["None", "Text watermark", "Image watermark", "Page number", "Date stamp", "Custom"],
@@ -56,14 +75,29 @@ export const UNIVERSAL_TREATMENTS = [
   "Estimate processing time"
 ];
 
-type RecipeInput = Omit<ConversionRecipe, "implementation" | "localOnly"> & Partial<Pick<ConversionRecipe, "implementation">>;
+const VERIFIED_BROWSER_RECIPE_IDS = new Set([...VERIFIED_IMAGE_RECIPE_IDS, ...VERIFIED_PDF_RECIPE_IDS, ...VERIFIED_TABULAR_RECIPE_IDS, ...VERIFIED_OFFICE_RECIPE_IDS, ...VERIFIED_ARCHIVE_RECIPE_IDS, ...VERIFIED_EBOOK_RECIPE_IDS, ...VERIFIED_MEDIA_RECIPE_IDS]);
+
+type RecipeInput = Omit<ConversionRecipe, "implementation" | "localOnly" | "maturity" | "runtimes"> & Partial<Pick<ConversionRecipe, "implementation">>;
 
 function recipe(config: RecipeInput): ConversionRecipe {
+  const implementation = config.implementation ?? "ready";
+
   return {
-    implementation: "ready",
+    ...config,
+    implementation,
+    maturity: legacyRecipeMaturity(config.id, implementation),
+    runtimes: legacyRecipeRuntimes(config.id),
     localOnly: true,
-    ...config
   };
+}
+
+function legacyRecipeMaturity(id: string, implementation: ConversionImplementation): RecipeMaturity {
+  if (VERIFIED_BROWSER_RECIPE_IDS.has(id)) return "verified";
+  return implementation === "planned" ? "planned" : "implemented";
+}
+
+function legacyRecipeRuntimes(id: string): RecipeRuntime[] {
+  return VERIFIED_BROWSER_RECIPE_IDS.has(id) ? ["browser"] : [];
 }
 
 function options(values: Partial<Record<EditorControl, string[]>>) {
@@ -71,19 +105,35 @@ function options(values: Partial<Record<EditorControl, string[]>>) {
 }
 
 const imageFormatOptions = options({
-  resolution: ["Original", "512 px", "1024 px", "1080 px", "1920 px", "2K", "4K", "Custom width"],
+  resolution: ["Original", "512 px wide", "1024 px wide", "1920 px wide"],
+  crop: ["Fit entire source", "Center square crop", "Center 4:5 crop", "Center 16:9 crop"],
   compression: ["Lossless", "Maximum quality", "High quality", "Balanced", "Small file", "Tiny preview"],
-  metadata: ["Keep", "Strip", "Inspect report", "Normalize"],
-  batchNaming: ["Keep source name", "Clean filename", "Size suffix", "Format suffix", "Custom pattern"]
+  color: ["Preserve transparency", "White matte", "Black matte"],
+  batchNaming: ["Keep source name", "Clean filename", "Format suffix"]
 });
 
 const pdfPageOptions = options({
-  pageOrder: ["All pages", "First page", "Last page", "Odd pages", "Even pages", "Custom range", "Split every page"],
-  resolution: ["96 DPI", "150 DPI", "200 DPI", "300 DPI", "2x screen", "4x screen"],
+  pageOrder: [...PDF_PAGE_SELECTION_OPTIONS],
+  resolution: ["96 DPI", "150 DPI", "200 DPI", "300 DPI"],
   compression: ["Maximum quality", "High quality", "Balanced", "Small file"],
-  batchNaming: ["Page number suffix", "Clean filename", "Custom pattern"],
-  bundle: ["ZIP", "ZIP with manifest", "Folder by page"]
+  batchNaming: ["Page number suffix", "Page number only", "Clean filename"],
+  bundle: ["Store ZIP", "Balanced ZIP", "Balanced ZIP with manifest", "Maximum ZIP with manifest"]
 });
+
+function videoTranscodeOptions() {
+  return options({
+    trim: MEDIA_TRIM_OPTIONS,
+    aspectRatio: ["Original", "16:9 widescreen", "9:16 vertical", "1:1 square", "4:5 portrait"],
+    crop: ["Fit inside", "Fill and crop", "Stretch"],
+    resolution: ["Source resolution", "360p preview", "720p", "1080p", "1440p", "4K"],
+    frameRate: ["Source frame rate", "12 fps", "24 fps", "30 fps", "60 fps"],
+    compression: ["Maximum quality", "High quality", "Balanced", "Small file"],
+    metadata: ["Keep tags", "Strip tags"],
+    batchNaming: ["Converted suffix", "Clean filename"]
+  });
+}
+
+const MEDIA_TRIM_OPTIONS = ["Full file", "First 1 second", "First 5 seconds", "First 15 seconds", "First 30 seconds", "Custom range"];
 
 export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
@@ -95,12 +145,13 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Convert the image into a clean single-page PDF.",
     treatments: ["Single page", "Original size", "PDF"],
     keywords: ["document", "paper", "print", "portable document", "share", "page"],
-    editorControls: ["pageSize", "margins", "compression", "metadata", "batchNaming"],
+    editorControls: ["pageSize", "margins", "crop", "compression", "metadata", "batchNaming"],
     controlOptions: options({
-      pageSize: ["Original image size", "Letter", "A4", "16:9 slide", "4:5 carousel", "1:1 square", "Custom"],
-      margins: ["None", "Narrow", "Standard", "Wide", "Bleed"],
+      pageSize: ["Original image size at 96 PPI", "Letter", "A4", "16:9 slide", "4:5 carousel", "1:1 square"],
+      margins: ["None", "Narrow", "Standard", "Wide"],
+      crop: ["Fit entire source", "Fill page"],
       compression: ["Maximum quality", "High quality", "Balanced", "Small file"],
-      metadata: ["Keep", "Strip", "Inspect report"],
+      metadata: ["Keep source filename", "Strip source details"],
       batchNaming: ["Keep source name", "Clean filename", "PDF suffix"]
     }),
     requiredCapabilities: ["canvas", "pdf", "image"],
@@ -117,12 +168,13 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Place the image on a print page with safe margins.",
     treatments: ["Letter/A4", "Centered", "Margins"],
     keywords: ["print", "paper", "letter", "page", "pdf", "document", "handout"],
-    editorControls: ["pageSize", "margins", "compression", "metadata", "batchNaming"],
+    editorControls: ["pageSize", "margins", "crop", "compression", "metadata", "batchNaming"],
     controlOptions: options({
       pageSize: ["Letter", "A4", "Legal", "A5"],
-      margins: ["Narrow", "Standard", "Wide", "Bleed"],
-      compression: ["Maximum quality", "High quality", "Balanced"],
-      metadata: ["Keep", "Strip", "Inspect report"],
+      margins: ["None", "Narrow", "Standard", "Wide"],
+      crop: ["Fit entire source", "Fill page"],
+      compression: ["Maximum quality", "High quality", "Balanced", "Small file"],
+      metadata: ["Keep source filename", "Strip source details"],
       batchNaming: ["Keep source name", "Clean filename", "Print suffix"]
     }),
     requiredCapabilities: ["canvas", "pdf", "image"],
@@ -139,7 +191,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Convert to PNG for transparency and lossless exports.",
     treatments: ["Lossless", "Transparency", "PNG"],
     keywords: ["transparent", "alpha", "lossless", "picture", "photo", "graphic", "screenshot"],
-    editorControls: ["resolution", "compression", "metadata", "batchNaming"],
+    editorControls: ["resolution", "crop", "color", "batchNaming"],
     controlOptions: imageFormatOptions,
     requiredCapabilities: ["canvas", "image"],
     intensity: "light",
@@ -155,8 +207,8 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Convert to JPEG for photos, previews, and smaller files.",
     treatments: ["Photo", "White matte", "JPG"],
     keywords: ["jpg", "jpeg", "photo", "picture", "small", "compressed", "web"],
-    editorControls: ["resolution", "compression", "color", "metadata", "batchNaming"],
-    controlOptions: { ...imageFormatOptions, color: ["White matte", "Black matte", "Sample edge color", "Custom matte"] },
+    editorControls: ["resolution", "crop", "color", "compression", "batchNaming"],
+    controlOptions: { ...imageFormatOptions, color: ["White matte", "Black matte"] },
     requiredCapabilities: ["canvas", "image"],
     intensity: "light",
     engine: "Canvas / createImageBitmap",
@@ -171,7 +223,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Convert to WebP for modern web use and compact previews.",
     treatments: ["Modern web", "Quality", "Small file"],
     keywords: ["web", "site", "browser", "small", "compressed", "preview", "photo"],
-    editorControls: ["resolution", "compression", "metadata", "batchNaming"],
+    editorControls: ["resolution", "crop", "color", "compression", "batchNaming"],
     controlOptions: imageFormatOptions,
     requiredCapabilities: ["canvas", "image", "webpEncoder"],
     intensity: "light",
@@ -187,7 +239,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Convert to AVIF when the browser encoder is available.",
     treatments: ["Modern web", "High compression", "AVIF"],
     keywords: ["avif", "web", "small", "compressed", "photo", "picture", "modern"],
-    editorControls: ["resolution", "compression", "metadata", "batchNaming"],
+    editorControls: ["resolution", "crop", "color", "compression", "batchNaming"],
     controlOptions: imageFormatOptions,
     requiredCapabilities: ["canvas", "image", "avifEncoder"],
     intensity: "light",
@@ -203,7 +255,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Convert to a standard bitmap file for older apps.",
     treatments: ["Bitmap", "Legacy", "No alpha"],
     keywords: ["bmp", "bitmap", "windows", "legacy", "raw", "image", "picture"],
-    editorControls: ["resolution", "color", "metadata", "batchNaming"],
+    editorControls: ["resolution", "crop", "color", "batchNaming"],
     controlOptions: { ...imageFormatOptions, color: ["White matte", "Black matte"] },
     requiredCapabilities: ["canvas", "image"],
     intensity: "light",
@@ -216,11 +268,11 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     category: "Web embed",
     output: "SVG",
     title: "Image to SVG wrapper",
-    description: "Embed the raster image inside an SVG file.",
-    treatments: ["SVG", "Embedded image", "Scalable frame"],
+    description: "Wrap the original raster pixels inside an SVG frame; this does not vectorize the image.",
+    treatments: ["SVG wrapper", "Embedded raster", "Scalable frame"],
     keywords: ["svg", "vector", "wrapper", "embed", "xml", "graphic", "image"],
-    editorControls: ["resolution", "metadata", "batchNaming"],
-    controlOptions: imageFormatOptions,
+    editorControls: ["resolution", "batchNaming"],
+    controlOptions: { resolution: imageFormatOptions.resolution, batchNaming: imageFormatOptions.batchNaming },
     requiredCapabilities: ["image"],
     intensity: "light",
     engine: "SVG data wrapper",
@@ -235,7 +287,8 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Export the image as a Base64 data URI text file.",
     treatments: ["Base64", "Data URI", "Text"],
     keywords: ["base64", "data uri", "embed", "inline", "css", "html", "text"],
-    editorControls: ["metadata", "batchNaming"],
+    editorControls: ["batchNaming"],
+    controlOptions: { batchNaming: imageFormatOptions.batchNaming },
     requiredCapabilities: ["image"],
     intensity: "light",
     engine: "FileReader / Base64",
@@ -250,7 +303,8 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Create a standalone HTML file with the image embedded.",
     treatments: ["HTML", "Embedded", "Portable"],
     keywords: ["html", "webpage", "embed", "inline", "browser", "site", "share"],
-    editorControls: ["metadata", "batchNaming"],
+    editorControls: ["resolution", "batchNaming"],
+    controlOptions: { resolution: imageFormatOptions.resolution, batchNaming: imageFormatOptions.batchNaming },
     requiredCapabilities: ["image"],
     intensity: "light",
     engine: "HTML data embed",
@@ -263,18 +317,19 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     output: "ZIP",
     title: "Image thumbnail ZIP",
     description: "Generate web-ready thumbnails in multiple sizes.",
-    treatments: ["320", "640", "1080", "WebP"],
+    treatments: ["WebP or JPEG", "Multiple widths", "Manifest"],
     keywords: ["thumbnail", "thumb", "preview", "sizes", "web", "social", "zip", "bundle"],
-    editorControls: ["resolution", "compression", "batchNaming", "bundle"],
+    editorControls: ["outputFormat", "resolution", "compression", "batchNaming", "bundle"],
     controlOptions: {
-      resolution: ["320/640/1080/1920 set", "512/1024/2048 set", "Social thumbnail set", "Custom sizes"],
-      compression: ["High quality", "Balanced", "Small file"],
-      batchNaming: ["Width suffix", "Clean filename", "Custom pattern"],
-      bundle: ["ZIP", "ZIP with manifest", "Folder by size"]
+      outputFormat: ["WebP", "JPEG"],
+      resolution: ["160/320/640 set", "320/640/1080/1920 set", "512/1024/2048 set"],
+      compression: ["Maximum quality", "Balanced", "Small file"],
+      batchNaming: ["Width suffix", "Numbered sequence"],
+      bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"]
     },
     requiredCapabilities: ["canvas", "image", "zip", "webpEncoder"],
     intensity: "light",
-    engine: "Canvas + fflate",
+    engine: "Canvas + zip.js",
     implementation: "ready"
   }),
   recipe({
@@ -288,14 +343,14 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     keywords: ["icon", "favicon", "app icon", "logo", "manifest", "png", "site", "zip"],
     editorControls: ["crop", "resolution", "batchNaming", "bundle"],
     controlOptions: {
-      crop: ["Center crop", "Fit inside transparent square", "Trim transparent edges", "Safe rounded icon crop"],
+      crop: ["Fit inside transparent square", "Center square crop"],
       resolution: ["16/32/48/180/192/512 set", "Full PWA set", "Browser-only set"],
-      batchNaming: ["Icon size suffix", "Clean filename", "Custom pattern"],
-      bundle: ["ZIP", "ZIP with manifest", "Folder by size"]
+      batchNaming: ["Source and size", "Standard icon names"],
+      bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"]
     },
     requiredCapabilities: ["canvas", "image", "zip"],
     intensity: "light",
-    engine: "Canvas + fflate",
+    engine: "Canvas + zip.js",
     implementation: "ready"
   }),
   recipe({
@@ -307,11 +362,19 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Download PNG, JPEG, and WebP versions together.",
     treatments: ["PNG", "JPEG", "WebP", "ZIP"],
     keywords: ["bundle", "zip", "all", "multiple", "formats", "png", "jpg", "webp"],
-    editorControls: ["resolution", "compression", "metadata", "batchNaming", "bundle"],
-    controlOptions: imageFormatOptions,
+    editorControls: ["outputFormat", "resolution", "crop", "color", "compression", "batchNaming", "bundle"],
+    controlOptions: {
+      outputFormat: ["PNG + JPEG + WebP", "PNG + JPEG", "PNG + WebP", "JPEG + WebP"],
+      resolution: imageFormatOptions.resolution,
+      crop: imageFormatOptions.crop,
+      color: imageFormatOptions.color,
+      compression: ["Maximum quality", "Balanced", "Small file"],
+      batchNaming: imageFormatOptions.batchNaming,
+      bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"]
+    },
     requiredCapabilities: ["canvas", "image", "zip", "webpEncoder"],
     intensity: "light",
-    engine: "Canvas + fflate",
+    engine: "Canvas + zip.js",
     implementation: "ready"
   }),
   recipe({
@@ -323,10 +386,19 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Create exact post, story, banner, thumbnail, and open-graph image sizes.",
     treatments: ["Open Graph", "Story", "Square", "Banner"],
     keywords: ["social", "linkedin", "instagram", "youtube", "thumbnail", "banner", "open graph"],
-    editorControls: ["aspectRatio", "crop", "resolution", "compression", "batchNaming", "bundle"],
+    editorControls: ["outputFormat", "aspectRatio", "crop", "resolution", "compression", "batchNaming", "bundle"],
+    controlOptions: {
+      outputFormat: ["JPEG", "WebP"],
+      aspectRatio: ["All platform ratios", "Square only", "Portrait only", "Landscape only"],
+      crop: ["Fill frame", "Fit entire source"],
+      resolution: ["Platform size", "Half-size preview"],
+      compression: ["Maximum quality", "Balanced", "Small file"],
+      batchNaming: ["Platform names", "Source prefix"],
+      bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"]
+    },
     requiredCapabilities: ["canvas", "image", "zip"],
     intensity: "light",
-    engine: "Canvas social preset renderer"
+    engine: "Canvas + zip.js social presets"
   }),
   recipe({
     id: "image-ocr-text",
@@ -369,7 +441,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     treatments: ["Text", "Page breaks", "TXT"],
     keywords: ["pdf", "text", "extract", "copy", "ocr", "read"],
     editorControls: ["pageOrder", "metadata", "batchNaming"],
-    controlOptions: { pageOrder: ["All pages", "First page", "Last page", "Custom range"], metadata: ["Keep page breaks", "Remove page breaks", "Add page headings"], batchNaming: ["TXT suffix", "Clean filename"] },
+    controlOptions: { pageOrder: [...PDF_PAGE_SELECTION_OPTIONS], metadata: ["Add page headings", "Keep page breaks", "Remove page breaks"], batchNaming: ["TXT suffix", "Clean filename"] },
     requiredCapabilities: ["pdf", "worker"],
     intensity: "standard",
     engine: "PDF.js text extraction",
@@ -385,7 +457,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     treatments: ["Markdown", "Page headings", "MD"],
     keywords: ["pdf", "markdown", "md", "text", "extract", "document"],
     editorControls: ["pageOrder", "metadata", "batchNaming"],
-    controlOptions: { pageOrder: ["All pages", "First page", "Last page", "Custom range"], metadata: ["Page headings", "Minimal headings", "Include source metadata"], batchNaming: ["Markdown suffix", "Clean filename"] },
+    controlOptions: { pageOrder: [...PDF_PAGE_SELECTION_OPTIONS], metadata: ["Page headings", "Minimal headings", "Include source metadata"], batchNaming: ["Markdown suffix", "Clean filename"] },
     requiredCapabilities: ["pdf", "worker"],
     intensity: "standard",
     engine: "PDF.js text extraction",
@@ -401,7 +473,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     treatments: ["HTML", "Page sections", "Embedded style"],
     keywords: ["pdf", "html", "web", "text", "extract", "document"],
     editorControls: ["pageOrder", "metadata", "batchNaming"],
-    controlOptions: { pageOrder: ["All pages", "First page", "Last page", "Custom range"], metadata: ["Include source metadata", "Minimal"], batchNaming: ["HTML suffix", "Clean filename"] },
+    controlOptions: { pageOrder: [...PDF_PAGE_SELECTION_OPTIONS], metadata: ["Include source metadata", "Minimal"], batchNaming: ["HTML suffix", "Clean filename"] },
     requiredCapabilities: ["pdf", "worker"],
     intensity: "standard",
     engine: "PDF.js text extraction",
@@ -420,7 +492,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     controlOptions: pdfPageOptions,
     requiredCapabilities: ["pdf", "canvas", "worker", "zip"],
     intensity: "standard",
-    engine: "PDF.js canvas renderer + fflate",
+    engine: "PDF.js canvas renderer + zip.js",
     implementation: "ready"
   }),
   recipe({
@@ -436,7 +508,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     controlOptions: pdfPageOptions,
     requiredCapabilities: ["pdf", "canvas", "worker", "zip"],
     intensity: "standard",
-    engine: "PDF.js canvas renderer + fflate",
+    engine: "PDF.js canvas renderer + zip.js",
     implementation: "ready"
   }),
   recipe({
@@ -449,10 +521,71 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     treatments: ["Split", "One PDF per page", "ZIP"],
     keywords: ["pdf", "split", "pages", "separate", "extract", "zip"],
     editorControls: ["pageOrder", "batchNaming", "bundle"],
-    controlOptions: { pageOrder: ["All pages", "Odd pages", "Even pages", "Custom range"], batchNaming: ["Page number suffix", "Clean filename"], bundle: ["ZIP", "ZIP with manifest"] },
+    controlOptions: { pageOrder: [...PDF_PAGE_SELECTION_OPTIONS], batchNaming: ["Page number suffix", "Page number only", "Clean filename"], bundle: ["Store ZIP", "Balanced ZIP", "Balanced ZIP with manifest", "Maximum ZIP with manifest"] },
     requiredCapabilities: ["pdf", "zip", "worker"],
     intensity: "standard",
-    engine: "pdf-lib + fflate",
+    engine: "pdf-lib + zip.js",
+    implementation: "ready"
+  }),
+  recipe({
+    id: "pdf-extract-pages",
+    input: ["pdf"],
+    category: "PDF edit",
+    output: "PDF",
+    title: "Extract selected pages",
+    description: "Create one PDF from the pages and order you choose.",
+    treatments: ["Select pages", "Reorder", "PDF"],
+    keywords: ["pdf", "extract", "select", "pages", "reorder", "subset"],
+    editorControls: ["pageOrder", "metadata", "batchNaming"],
+    controlOptions: {
+      pageOrder: [...PDF_PAGE_SELECTION_OPTIONS],
+      metadata: ["Keep document details", "Strip document details"],
+      batchNaming: ["Extracted suffix", "Clean filename"]
+    },
+    requiredCapabilities: ["pdf", "worker"],
+    intensity: "light",
+    engine: "pdf-lib page copier",
+    implementation: "ready"
+  }),
+  recipe({
+    id: "pdf-reorder-pages",
+    input: ["pdf"],
+    category: "PDF edit",
+    output: "PDF",
+    title: "Reorder PDF pages",
+    description: "Create a PDF with every page in a new deterministic order.",
+    treatments: ["Reverse", "Odd/even order", "PDF"],
+    keywords: ["pdf", "reorder", "reverse", "sort", "pages", "odd", "even"],
+    editorControls: ["pageOrder", "metadata", "batchNaming"],
+    controlOptions: {
+      pageOrder: ["Reverse order", "Odd pages, then even pages", "Even pages, then odd pages", "All pages"],
+      metadata: ["Keep document details", "Strip document details"],
+      batchNaming: ["Reordered suffix", "Clean filename"]
+    },
+    requiredCapabilities: ["pdf", "worker"],
+    intensity: "light",
+    engine: "pdf-lib page copier",
+    implementation: "ready"
+  }),
+  recipe({
+    id: "pdf-rotate-pages",
+    input: ["pdf"],
+    category: "PDF edit",
+    output: "PDF",
+    title: "Rotate PDF pages",
+    description: "Rotate all or selected pages while preserving the rest of the document.",
+    treatments: ["Select pages", "90 or 180 degrees", "PDF"],
+    keywords: ["pdf", "rotate", "turn", "portrait", "landscape", "pages"],
+    editorControls: ["pageOrder", "rotation", "metadata", "batchNaming"],
+    controlOptions: {
+      pageOrder: [...PDF_PAGE_SELECTION_OPTIONS],
+      rotation: ["90 degrees clockwise", "180 degrees", "90 degrees counterclockwise"],
+      metadata: ["Keep document details", "Strip document details"],
+      batchNaming: ["Rotated suffix", "Clean filename"]
+    },
+    requiredCapabilities: ["pdf", "worker"],
+    intensity: "light",
+    engine: "pdf-lib page rotation",
     implementation: "ready"
   }),
   recipe({
@@ -465,7 +598,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     treatments: ["Metadata", "Page count", "JSON"],
     keywords: ["pdf", "metadata", "inspect", "json", "manifest", "report"],
     editorControls: ["metadata", "batchNaming"],
-    controlOptions: { metadata: ["JSON report", "JSON + text summary"], batchNaming: ["Metadata suffix", "Clean filename"] },
+    controlOptions: { metadata: ["Full metadata report", "Document info only"], batchNaming: ["Metadata suffix", "Clean filename"] },
     requiredCapabilities: ["pdf", "worker"],
     intensity: "light",
     engine: "PDF.js + pdf-lib",
@@ -476,12 +609,19 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     input: ["pdf"],
     category: "Presentation",
     output: "PNG ZIP",
-    title: "PDF to 16:9 slide images",
-    description: "Render pages as slide-ready PNG images with widescreen padding.",
-    treatments: ["16:9", "Slide PNGs", "ZIP"],
+    title: "PDF to slide images",
+    description: "Render selected pages as exact 16:9 or 4:3 PNG slides.",
+    treatments: ["16:9 or 4:3", "Slide PNGs", "ZIP"],
     keywords: ["presentation", "deck", "slides", "ppt", "keynote", "pdf", "images"],
     editorControls: ["pageOrder", "aspectRatio", "resolution", "color", "batchNaming", "bundle"],
-    controlOptions: { ...pdfPageOptions, aspectRatio: ["16:9 widescreen", "4:3 classic slides"], color: ["Original", "White letterbox", "Black letterbox"] },
+    controlOptions: {
+      pageOrder: [...PDF_PAGE_SELECTION_OPTIONS],
+      aspectRatio: ["16:9 widescreen", "4:3 classic slides"],
+      resolution: ["1024 px wide", "1920 px wide", "4K wide"],
+      color: ["White letterbox", "Black letterbox"],
+      batchNaming: ["Slide number suffix", "Page number only", "Clean filename"],
+      bundle: ["Store ZIP", "Balanced ZIP", "Balanced ZIP with manifest", "Maximum ZIP with manifest"]
+    },
     requiredCapabilities: ["pdf", "canvas", "worker", "zip"],
     intensity: "standard",
     engine: "PDF.js slide renderer"
@@ -492,10 +632,16 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     category: "Presentation",
     output: "PPTX outline",
     title: "PDF to PPTX outline",
-    description: "Extract page text into a slide-by-slide presentation outline.",
-    treatments: ["Slide outline", "Speaker notes", "PPTX later"],
+    description: "Create an editable PPTX text outline from selected page text; this is not a visual replica of the PDF.",
+    treatments: ["Editable text", "Title and body", "PPTX outline"],
     keywords: ["presentation", "deck", "pptx", "powerpoint", "outline", "speaker notes"],
     editorControls: ["pageOrder", "metadata", "batchNaming", "bundle"],
+    controlOptions: {
+      pageOrder: [...PDF_PAGE_SELECTION_OPTIONS],
+      metadata: ["Include source note", "Slide text only"],
+      batchNaming: ["Outline suffix", "Clean filename"],
+      bundle: ["Store compression", "Balanced compression", "Maximum compression"]
+    },
     requiredCapabilities: ["pdf", "worker"],
     intensity: "standard",
     engine: "PDF.js + PPTX writer"
@@ -510,7 +656,14 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     treatments: ["4:5", "1:1", "Page images", "ZIP"],
     keywords: ["linkedin", "carousel", "social", "slides", "images", "pdf"],
     editorControls: ["pageOrder", "aspectRatio", "resolution", "crop", "batchNaming", "bundle"],
-    controlOptions: { ...pdfPageOptions, aspectRatio: ["4:5 portrait", "1:1 square", "16:9 widescreen"], crop: ["Fit entire page", "Fill target", "Safe crop"] },
+    controlOptions: {
+      pageOrder: [...PDF_PAGE_SELECTION_OPTIONS],
+      aspectRatio: ["4:5 portrait", "1:1 square", "16:9 widescreen"],
+      resolution: ["1080 px wide", "1920 px wide", "4K wide"],
+      crop: ["Fit entire page", "Fill target"],
+      batchNaming: ["Carousel number suffix", "Page number only", "Clean filename"],
+      bundle: ["Store ZIP", "Balanced ZIP", "Balanced ZIP with manifest", "Maximum ZIP with manifest"]
+    },
     requiredCapabilities: ["pdf", "canvas", "worker", "zip"],
     intensity: "standard",
     engine: "PDF.js social renderer"
@@ -524,8 +677,8 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Place multiple pages per sheet for printable handouts.",
     treatments: ["2-up", "4-up", "Margins", "PDF"],
     keywords: ["handout", "print", "pages per sheet", "pdf", "presentation"],
-    editorControls: ["pageOrder", "pageSize", "margins", "metadata", "batchNaming"],
-    controlOptions: { pageOrder: ["All pages", "Custom range"], pageSize: ["Letter", "A4"], margins: ["Narrow", "Standard", "Wide"] },
+    editorControls: ["pageOrder", "pageLayout", "pageSize", "margins", "metadata", "batchNaming"],
+    controlOptions: { pageOrder: [...PDF_PAGE_SELECTION_OPTIONS], pageLayout: ["2 pages per sheet", "4 pages per sheet"], pageSize: ["Letter", "A4"], margins: ["Narrow", "Standard", "Wide"], metadata: ["Keep document details", "Strip document details"], batchNaming: ["Handout suffix", "Clean filename"] },
     requiredCapabilities: ["pdf", "worker"],
     intensity: "standard",
     engine: "pdf-lib page layout"
@@ -564,11 +717,12 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     input: ["pdf"],
     category: "PDF edit",
     output: "Optimized PDF",
-    title: "Compress PDF",
-    description: "Reduce PDF size by rewriting, cleaning metadata, and downsampling images where possible.",
-    treatments: ["Compress", "Strip metadata", "PDF"],
+    title: "Optimize or visually compress PDF",
+    description: "Rewrite PDF structure losslessly, or flatten pages at 150 or 96 DPI for stronger visual compression with selectable text removed.",
+    treatments: ["Lossless rewrite", "Visual flattening", "PDF"],
     keywords: ["compress", "optimize", "small", "pdf", "metadata"],
     editorControls: ["compression", "metadata", "batchNaming"],
+    controlOptions: { compression: ["Lossless structure rewrite", "Balanced visual flattening (150 DPI)", "Smallest visual flattening (96 DPI)"], metadata: ["Keep document details", "Strip document details"], batchNaming: ["Optimized suffix", "Clean filename"] },
     requiredCapabilities: ["pdf", "worker"],
     intensity: "standard",
     engine: "pdf-lib optimizer"
@@ -577,42 +731,59 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "video-to-frames",
     input: ["video"],
+    inputFormats: ["mp4", "webm"],
     category: "Frames",
     output: "Frame ZIP",
     title: "Video to image frames",
-    description: "Extract still frames by every frame, every N seconds, chapters, scene picks, or manual timeline marks.",
-    treatments: ["Every frame", "Every second", "Custom interval", "ZIP"],
-    editorControls: ["timeline", "trim", "outputFormat", "frameInterval", "chapterInterval", "resolution", "batchNaming", "bundle"],
-    controlOptions: { outputFormat: ["PNG", "JPEG", "WebP"], frameInterval: DEFAULT_CONTROL_OPTIONS.frameInterval },
-    requiredCapabilities: ["video", "canvas", "worker"],
+    description: "Decode every frame or exact timeline intervals into a validated image ZIP with optional manifest.",
+    treatments: ["Every frame", "Timed sampling", "PNG/JPEG/WebP", "Manifest"],
+    keywords: ["video", "frames", "stills", "png", "jpg", "jpeg", "webp", "extract", "sequence", "zip"],
+    editorControls: ["outputFormat", "trim", "frameInterval", "resolution", "compression", "metadata", "batchNaming", "bundle"],
+    controlOptions: {
+      outputFormat: ["PNG", "JPEG", "WebP"],
+      trim: MEDIA_TRIM_OPTIONS,
+      frameInterval: ["Every 0.5 seconds", "Every 1 second", "Every 2 seconds", "Every 5 seconds", "Every frame"],
+      resolution: ["Source resolution", "80 px wide", "720 px wide", "1280 px wide", "1920 px wide"],
+      compression: ["Maximum quality", "High quality", "Balanced", "Small file"],
+      metadata: ["Include manifest", "Files only"],
+      batchNaming: ["Timestamp names", "Sequence names"],
+      bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"]
+    },
+    requiredCapabilities: ["video", "canvas", "webcodecs", "worker", "zip"],
     intensity: "standard",
-    engine: "HTMLVideoElement + Canvas; FFmpeg WASM for advanced modes"
+    engine: "Mediabunny VideoSampleSink + Canvas + zip.js"
   }),
   recipe({
     id: "video-to-mp4",
     input: ["video"],
+    inputFormats: ["mp4", "webm"],
     category: "Video format",
     output: "MP4",
     title: "Video to MP4",
-    description: "Transcode, trim, crop, resize, and compress into MP4.",
-    treatments: ["MP4", "Trim", "Aspect", "Compress"],
-    editorControls: ["timeline", "trim", "crop", "aspectRatio", "resolution", "frameRate", "audioGain", "compression", "bundle"],
-    requiredCapabilities: ["video", "wasm", "worker", "webcodecs"],
-    intensity: "extreme",
-    engine: "Mediabunny / WebCodecs / FFmpeg WASM"
+    description: "Transcode the primary video and audio tracks to AVC/AAC MP4 with real trim, geometry, frame-rate, quality, tag, and naming controls.",
+    treatments: ["AVC video", "AAC audio", "Trim", "Resize/crop"],
+    keywords: ["video", "mp4", "h264", "avc", "aac", "transcode", "resize", "crop", "compress"],
+    editorControls: ["trim", "aspectRatio", "crop", "resolution", "frameRate", "compression", "metadata", "batchNaming"],
+    controlOptions: videoTranscodeOptions(),
+    requiredCapabilities: ["video", "webcodecs", "worker"],
+    intensity: "heavy",
+    engine: "Mediabunny Conversion + WebCodecs AVC/AAC"
   }),
   recipe({
     id: "video-to-webm",
     input: ["video"],
+    inputFormats: ["mp4", "webm"],
     category: "Video format",
     output: "WebM",
     title: "Video to WebM",
-    description: "Create a browser-friendly WebM file with size controls.",
-    treatments: ["WebM", "VP9/AV1", "Compress"],
-    editorControls: ["timeline", "trim", "crop", "aspectRatio", "resolution", "frameRate", "audioGain", "compression"],
-    requiredCapabilities: ["video", "wasm", "worker", "webcodecs"],
-    intensity: "extreme",
-    engine: "Mediabunny / WebCodecs / FFmpeg WASM"
+    description: "Transcode the primary tracks to VP9/Opus WebM with real trim, geometry, frame-rate, quality, tag, and naming controls.",
+    treatments: ["VP9 video", "Opus audio", "Trim", "Resize/crop"],
+    keywords: ["video", "webm", "vp9", "opus", "browser", "transcode", "resize", "crop", "compress"],
+    editorControls: ["trim", "aspectRatio", "crop", "resolution", "frameRate", "compression", "metadata", "batchNaming"],
+    controlOptions: videoTranscodeOptions(),
+    requiredCapabilities: ["video", "webcodecs", "worker"],
+    intensity: "heavy",
+    engine: "Mediabunny Conversion + WebCodecs VP9/Opus"
   }),
   recipe({
     id: "video-to-gif",
@@ -630,29 +801,50 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "video-to-audio",
     input: ["video"],
+    inputFormats: ["mp4", "webm"],
     category: "Audio extraction",
     output: "Audio",
     title: "Video to audio file",
-    description: "Extract MP3, WAV, AAC, or M4A audio from a video.",
-    treatments: ["MP3", "WAV", "AAC", "M4A"],
-    editorControls: ["outputFormat", "timeline", "trim", "audioGain", "audioFade", "metadata", "batchNaming"],
-    controlOptions: { outputFormat: ["MP3", "WAV", "AAC", "M4A", "OGG"], audioGain: DEFAULT_CONTROL_OPTIONS.audioGain },
-    requiredCapabilities: ["audio", "video", "wasm", "worker"],
-    intensity: "heavy",
-    engine: "FFmpeg WASM + Web Audio"
+    description: "Extract the primary audio track as PCM WAV, AAC, M4A, or Opus OGG with trim, resampling, channels, quality, tags, and naming controls.",
+    treatments: ["WAV", "M4A", "AAC", "OGG"],
+    keywords: ["video", "audio", "extract", "wav", "m4a", "aac", "ogg", "opus", "sound"],
+    editorControls: ["outputFormat", "trim", "sampleRate", "audioChannels", "compression", "metadata", "batchNaming"],
+    controlOptions: {
+      outputFormat: ["WAV", "M4A", "AAC", "OGG"],
+      trim: MEDIA_TRIM_OPTIONS,
+      sampleRate: ["Source sample rate", "44.1 kHz", "48 kHz"],
+      audioChannels: ["Source channels", "Mono", "Stereo"],
+      compression: ["Maximum quality", "High quality", "Balanced", "Small file"],
+      metadata: ["Keep tags", "Strip tags"],
+      batchNaming: ["Audio suffix", "Clean filename"]
+    },
+    requiredCapabilities: ["audio", "video", "webcodecs", "worker"],
+    intensity: "standard",
+    engine: "Mediabunny Conversion + PCM/AAC/Opus encoders"
   }),
   recipe({
     id: "video-thumbnail-sheet",
     input: ["video"],
+    inputFormats: ["mp4", "webm"],
     category: "Frames",
     output: "Contact sheet",
     title: "Video thumbnail contact sheet",
-    description: "Create a single overview image showing frames across the timeline.",
-    treatments: ["Contact sheet", "Timeline", "PNG"],
-    editorControls: ["timeline", "frameInterval", "aspectRatio", "resolution", "batchNaming"],
-    requiredCapabilities: ["video", "canvas", "worker"],
+    description: "Sample the full timeline into a 2x2, 3x3, 4x3, or 4x4 raster contact sheet with optional timestamps.",
+    treatments: ["Timeline overview", "Grid", "PNG/JPEG/WebP", "Timestamps"],
+    keywords: ["video", "thumbnail", "contact sheet", "storyboard", "timeline", "grid", "png", "jpg", "webp"],
+    editorControls: ["outputFormat", "trim", "pageLayout", "crop", "resolution", "metadata", "batchNaming"],
+    controlOptions: {
+      outputFormat: ["PNG", "JPEG", "WebP"],
+      trim: MEDIA_TRIM_OPTIONS,
+      pageLayout: ["3 x 3 grid", "2 x 2 grid", "4 x 3 grid", "4 x 4 grid"],
+      crop: ["Fill cells", "Fit inside cells", "Stretch to cells"],
+      resolution: ["1200 px wide", "800 px wide", "1920 px wide", "2400 px wide"],
+      metadata: ["Show timestamps", "No timestamps"],
+      batchNaming: ["Contact sheet suffix", "Clean filename"]
+    },
+    requiredCapabilities: ["video", "canvas", "webcodecs", "worker"],
     intensity: "standard",
-    engine: "HTMLVideoElement + Canvas"
+    engine: "Mediabunny VideoSampleSink + Canvas"
   }),
   recipe({
     id: "audio-to-mp3",
@@ -669,78 +861,107 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   }),
   recipe({
     id: "audio-to-wav",
-    input: ["audio", "video"],
+    input: ["audio"],
+    inputFormats: ["wav", "mp3", "ogg", "flac", "aac", "m4a"],
     category: "Audio format",
     output: "WAV",
     title: "Audio to WAV",
-    description: "Export uncompressed WAV for editing or archiving.",
-    treatments: ["WAV", "Lossless", "Normalize"],
-    editorControls: ["timeline", "trim", "audioGain", "audioFade", "metadata", "batchNaming"],
-    requiredCapabilities: ["audio", "wasm", "worker"],
+    description: "Export a parsed audio track as PCM WAV with real sample-rate, channel, bit-depth, trim, tag, and naming controls.",
+    treatments: ["16/24-bit PCM", "32-bit float", "Resample", "Mono/stereo", "Trim"],
+    keywords: ["wav", "wave", "pcm", "lossless", "audio", "sample rate", "bit depth", "mono", "stereo", "trim"],
+    editorControls: ["trim", "sampleRate", "audioChannels", "bitDepth", "metadata", "batchNaming"],
+    controlOptions: {
+      trim: MEDIA_TRIM_OPTIONS,
+      sampleRate: ["Source sample rate", "44.1 kHz", "48 kHz", "96 kHz"],
+      audioChannels: ["Source channels", "Mono", "Stereo"],
+      bitDepth: ["16-bit PCM", "24-bit PCM", "32-bit float"],
+      metadata: ["Keep tags", "Strip tags"],
+      batchNaming: ["Converted suffix", "Clean filename"]
+    },
+    requiredCapabilities: ["audio", "worker"],
     intensity: "standard",
-    engine: "Web Audio + FFmpeg WASM"
+    engine: "Mediabunny container parser + PCM writer"
   }),
   recipe({
     id: "audio-to-video",
     input: ["audio"],
+    inputFormats: ["wav", "mp3", "ogg", "flac", "aac", "m4a"],
     category: "Video",
     output: "MP4 / WebM",
     title: "Audio to video",
-    description: "Create a video from audio with a clean waveform visual, title card, and embedded sound.",
-    treatments: ["Waveform video", "MP4", "WebM", "Title card"],
+    description: "Encode audio and a generated waveform or progress visual directly into MP4 or WebM without real-time playback.",
+    treatments: ["Waveform video", "MP4 AVC/AAC", "WebM VP9/Opus", "Title metadata"],
     keywords: ["audio", "video", "music", "podcast", "audiogram", "waveform", "mp4", "webm", "sound"],
-    editorControls: ["outputFormat", "aspectRatio", "resolution", "frameRate", "waveform", "color", "compression", "metadata", "batchNaming"],
+    editorControls: ["outputFormat", "trim", "aspectRatio", "resolution", "frameRate", "waveform", "color", "compression", "metadata", "batchNaming"],
     controlOptions: {
-      outputFormat: ["MP4", "WebM"],
+      outputFormat: ["WebM", "MP4"],
+      trim: MEDIA_TRIM_OPTIONS,
       aspectRatio: ["16:9 widescreen", "9:16 vertical", "1:1 square", "4:5 portrait"],
-      resolution: ["1080 px", "1920 px", "2K", "4K"],
-      frameRate: ["24 fps", "30 fps", "60 fps"],
-      waveform: ["Animated waveform", "Static waveform", "Progress bar"],
-      compression: ["Maximum quality", "High quality", "Balanced", "Small file"]
+      resolution: ["1080p", "720p", "1440p", "4K", "360p preview"],
+      frameRate: ["24 fps", "30 fps", "60 fps", "12 fps"],
+      waveform: ["Animated waveform", "Static waveform", "Progress bar", "Cover card"],
+      color: ["Gold on charcoal", "Emerald on cream", "Monochrome"],
+      compression: ["Maximum quality", "High quality", "Balanced", "Small file"],
+      metadata: ["Filename title", "No title"],
+      batchNaming: ["Converted suffix", "Clean filename"]
     },
-    requiredCapabilities: ["audio", "canvas", "mediarecorder", "wasm", "worker"],
+    requiredCapabilities: ["audio", "canvas", "webcodecs", "worker"],
     intensity: "heavy",
-    engine: "Web Audio + Canvas + MediaRecorder + FFmpeg WASM"
+    engine: "Mediabunny CanvasSource + AudioBufferSource + WebCodecs"
   }),
   recipe({
     id: "audio-waveform",
-    input: ["audio", "video"],
+    input: ["audio"],
+    inputFormats: ["wav", "mp3", "ogg", "flac", "aac", "m4a"],
     category: "Audio visual",
-    output: "PNG / SVG",
-    title: "Audio to waveform image",
-    description: "Render waveform graphics for thumbnails, notes, or audiograms.",
-    treatments: ["Waveform", "PNG", "SVG"],
-    editorControls: ["timeline", "waveform", "color", "resolution", "batchNaming"],
+    output: "SVG / PNG / JSON / ZIP",
+    title: "Audio to waveform assets",
+    description: "Decode the selected audio range into truthful peak data and export a vector, raster, JSON, or complete waveform bundle.",
+    treatments: ["SVG", "PNG", "Peak data", "Asset ZIP"],
+    keywords: ["waveform", "audio", "svg", "png", "peaks", "json", "visual", "audiogram", "thumbnail"],
+    editorControls: ["outputFormat", "trim", "resolution", "color", "batchNaming", "bundle"],
+    controlOptions: {
+      outputFormat: ["SVG waveform", "PNG waveform", "Peaks JSON", "Waveform ZIP"],
+      trim: MEDIA_TRIM_OPTIONS,
+      resolution: ["1200 x 400", "1920 x 640", "2400 x 800"],
+      color: ["Gold on charcoal", "Emerald on cream", "Monochrome"],
+      batchNaming: ["Waveform suffix", "Clean filename"],
+      bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"]
+    },
     requiredCapabilities: ["audio", "canvas", "worker"],
     intensity: "standard",
-    engine: "Web Audio + wavesurfer.js"
+    engine: "Mediabunny AudioBufferSink + Canvas/SVG"
   }),
 
   recipe({
     id: "spreadsheet-to-csv",
     input: ["spreadsheet"],
+    inputFormats: ["xlsx"],
     category: "Table format",
     output: "CSV",
     title: "Spreadsheet to CSV",
-    description: "Export sheets as CSV files with column cleanup options.",
-    treatments: ["CSV", "Sheets", "Clean columns"],
-    editorControls: ["outputFormat", "metadata", "batchNaming", "bundle"],
-    controlOptions: { outputFormat: ["CSV", "TSV", "Pipe-delimited"], bundle: ["Single first sheet", "ZIP each sheet", "ZIP with manifest"] },
+    description: "Export one sheet or every workbook sheet as truthful CSV or TSV files.",
+    treatments: ["CSV", "TSV", "Every sheet"],
+    keywords: ["xlsx", "excel", "workbook", "sheet", "csv", "tsv", "table", "formula safe"],
+    editorControls: ["outputFormat", "sheetSelection", "formulaSafety", "bundle"],
+    controlOptions: { outputFormat: ["CSV", "TSV"], sheetSelection: ["All sheets", "First sheet"], formulaSafety: ["Protect spreadsheet formulas", "Preserve exact text"], bundle: ["Balanced ZIP with manifest", "Maximum ZIP with manifest", "Store ZIP", "ZIP without manifest"] },
     requiredCapabilities: ["spreadsheet", "worker", "zip"],
     intensity: "standard",
     engine: "read-excel-file + CSV writer"
   }),
   recipe({
     id: "spreadsheet-to-json",
-    input: ["spreadsheet", "data"],
+    input: ["spreadsheet"],
+    inputFormats: ["xlsx"],
     category: "Table format",
     output: "JSON",
     title: "Spreadsheet to JSON",
-    description: "Convert rows into JSON objects, arrays, or nested records.",
-    treatments: ["JSON", "Rows", "Schema"],
-    editorControls: ["outputFormat", "metadata", "batchNaming", "bundle"],
-    controlOptions: { outputFormat: ["Array of objects", "Array of arrays", "Nested by first column", "JSON Lines"], metadata: ["Infer types", "Keep strings", "Schema report"] },
-    requiredCapabilities: ["spreadsheet", "worker"],
+    description: "Convert one sheet or an entire workbook into typed JSON records, rows, or JSON Lines.",
+    treatments: ["JSON objects", "JSON rows", "JSON Lines", "Every sheet"],
+    keywords: ["xlsx", "excel", "workbook", "json", "jsonl", "records", "rows", "types"],
+    editorControls: ["outputFormat", "sheetSelection", "headerMode", "dataTypes", "bundle"],
+    controlOptions: { outputFormat: ["Combined workbook JSON", "JSON objects by sheet", "JSON rows by sheet", "JSON Lines by sheet"], sheetSelection: ["All sheets", "First sheet"], headerMode: ["First row is headers", "No header row"], dataTypes: ["Preserve detected types", "Convert all values to text"], bundle: ["Balanced ZIP with manifest", "Maximum ZIP with manifest", "Store ZIP", "ZIP without manifest"] },
+    requiredCapabilities: ["spreadsheet", "worker", "zip"],
     intensity: "standard",
     engine: "read-excel-file + JSON writer"
   }),
@@ -760,53 +981,64 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   }),
   recipe({
     id: "data-json-csv",
-    input: ["data", "code"],
+    input: ["data"],
+    inputFormats: ["json", "jsonl", "ndjson", "csv", "tsv"],
     category: "Data format",
-    output: "CSV / JSON",
-    title: "JSON CSV TSV transform",
-    description: "Convert structured data between JSON, CSV, TSV, XML, YAML, and Markdown tables.",
-    treatments: ["JSON", "CSV", "TSV", "Markdown"],
-    editorControls: ["outputFormat", "metadata", "batchNaming", "bundle"],
-    controlOptions: { outputFormat: ["JSON", "CSV", "TSV", "Markdown table", "XML", "YAML"], metadata: ["Prettify", "Minify", "Flatten", "Schema report"] },
+    output: "JSON / CSV / TSV / Markdown",
+    title: "Structured data conversion",
+    description: "Convert JSON, JSON Lines, CSV, and TSV into clean table formats without inventing unsupported syntax.",
+    treatments: ["JSON", "JSON Lines", "CSV", "TSV", "Markdown"],
+    keywords: ["json", "jsonl", "ndjson", "csv", "tsv", "table", "records", "markdown", "convert data"],
+    editorControls: ["outputFormat", "headerMode", "dataTypes", "formulaSafety", "batchNaming"],
+    controlOptions: { outputFormat: ["JSON objects", "JSON rows", "JSON Lines", "CSV", "TSV", "Markdown table"], headerMode: ["First row is headers", "No header row"], dataTypes: ["Keep source types", "Infer CSV value types", "Convert all values to text"], formulaSafety: ["Protect spreadsheet formulas", "Preserve exact text"], batchNaming: ["Clean filename", "Format suffix"] },
     requiredCapabilities: ["worker"],
     intensity: "light",
-    engine: "Native parsers + focused libraries"
+    engine: "Strict native JSON / CSV / TSV parsers"
   }),
   recipe({
     id: "document-to-markdown",
-    input: ["document", "ebook", "presentation"],
+    input: ["document"],
+    inputFormats: ["docx"],
     category: "Document format",
     output: "Markdown",
-    title: "Document to Markdown",
-    description: "Extract headings, text, links, and basic tables into Markdown.",
-    treatments: ["Markdown", "Headings", "Tables"],
-    editorControls: ["pageOrder", "metadata", "batchNaming", "bundle"],
+    title: "DOCX to Markdown",
+    description: "Convert Word headings, emphasis, links, lists, and tables into semantic Markdown.",
+    treatments: ["Markdown", "Headings", "Links", "Lists", "Tables"],
+    keywords: ["docx", "word", "markdown", "md", "headings", "table", "list", "link"],
+    editorControls: ["metadata", "batchNaming"],
+    controlOptions: { metadata: ["Content only", "Include source filename"], batchNaming: ["Converted suffix", "Clean filename"] },
     requiredCapabilities: ["worker", "zip"],
     intensity: "standard",
     engine: "Mammoth + ZIP/XML readers"
   }),
   recipe({
     id: "document-to-html",
-    input: ["document", "ebook", "presentation"],
+    input: ["document"],
+    inputFormats: ["docx"],
     category: "Document format",
     output: "HTML",
-    title: "Document to HTML",
-    description: "Export a standalone HTML version of the document.",
-    treatments: ["HTML", "Clean styles", "Assets"],
-    editorControls: ["pageOrder", "metadata", "batchNaming", "bundle"],
+    title: "DOCX to HTML",
+    description: "Export semantic Word content as sanitized standalone HTML with embedded or omitted images.",
+    treatments: ["HTML", "Sanitized", "Embedded images", "Tables"],
+    keywords: ["docx", "word", "html", "web", "embed images", "table", "link"],
+    editorControls: ["metadata", "batchNaming"],
+    controlOptions: { metadata: ["Embed images", "Omit images"], batchNaming: ["Converted suffix", "Clean filename"] },
     requiredCapabilities: ["worker", "zip"],
     intensity: "standard",
     engine: "Mammoth + ZIP/XML readers"
   }),
   recipe({
     id: "document-assets",
-    input: ["document", "ebook", "presentation"],
+    input: ["document"],
+    inputFormats: ["docx"],
     category: "Asset extraction",
     output: "Asset ZIP",
     title: "Extract document assets",
-    description: "Pull embedded images, media, XML parts, and a manifest into a ZIP.",
+    description: "Extract embedded Word media files into a clean ZIP without exposing internal XML parts.",
     treatments: ["Images", "Media", "Manifest", "ZIP"],
+    keywords: ["docx", "word", "extract", "images", "media", "assets", "zip"],
     editorControls: ["metadata", "batchNaming", "bundle"],
+    controlOptions: { metadata: ["Include manifest", "Assets only"], batchNaming: ["Assets suffix", "Clean filename"], bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"] },
     requiredCapabilities: ["zip", "worker"],
     intensity: "standard",
     engine: "ZIP/XML readers"
@@ -816,54 +1048,95 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     input: ["presentation"],
     category: "Presentation",
     output: "Slide image ZIP",
-    title: "Presentation to slide images",
-    description: "Render or extract each slide as a PNG/JPEG image set.",
+    title: "Presentation slide rendering",
+    description: "Requires a full Office-compatible visual renderer and is not available in the browser yet.",
     treatments: ["Slide images", "PNG/JPEG", "ZIP"],
     editorControls: ["outputFormat", "pageOrder", "aspectRatio", "resolution", "batchNaming", "bundle"],
     controlOptions: { outputFormat: ["PNG", "JPEG", "WebP"], aspectRatio: ["16:9 widescreen", "4:3 classic"], resolution: ["1080 px", "1920 px", "2K", "4K"] },
     requiredCapabilities: ["canvas", "worker", "zip"],
     intensity: "standard",
-    engine: "PPTX ZIP/XML reader + renderer"
+    engine: "Desktop Office renderer required",
+    implementation: "planned"
+  }),
+  recipe({
+    id: "presentation-assets",
+    input: ["presentation"],
+    inputFormats: ["pptx"],
+    category: "Asset extraction",
+    output: "Media ZIP",
+    title: "Extract presentation media",
+    description: "Extract embedded PowerPoint images, audio, and video with an optional source manifest.",
+    treatments: ["Images", "Audio", "Video", "Manifest", "ZIP"],
+    keywords: ["pptx", "powerpoint", "extract", "images", "audio", "video", "media", "assets", "zip"],
+    editorControls: ["metadata", "batchNaming", "bundle"],
+    controlOptions: { metadata: ["Include manifest", "Assets only"], batchNaming: ["Assets suffix", "Clean filename"], bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"] },
+    requiredCapabilities: ["zip", "worker"],
+    intensity: "standard",
+    engine: "Bounded zip.js Office package reader"
   }),
   recipe({
     id: "presentation-notes",
     input: ["presentation"],
+    inputFormats: ["pptx"],
     category: "Text extraction",
     output: "TXT / Markdown",
     title: "Presentation to notes text",
-    description: "Extract slide titles, speaker notes, and visible text.",
+    description: "Extract slides in declared presentation order with visible text and actual speaker notes.",
     treatments: ["Speaker notes", "Text", "Markdown"],
-    editorControls: ["outputFormat", "pageOrder", "metadata", "batchNaming", "bundle"],
-    controlOptions: { outputFormat: ["TXT", "Markdown", "JSON outline"] },
+    keywords: ["pptx", "powerpoint", "notes", "speaker notes", "text", "outline", "markdown", "json"],
+    editorControls: ["outputFormat", "slideSelection", "metadata", "batchNaming"],
+    controlOptions: { outputFormat: ["Markdown", "TXT", "JSON outline"], slideSelection: ["All slides", "First slide", "Last slide", "Odd slides", "Even slides", "Reverse order"], metadata: ["Visible text + speaker notes", "Visible text only", "Speaker notes only"], batchNaming: ["Notes suffix", "Clean filename"] },
     requiredCapabilities: ["worker", "zip"],
     intensity: "standard",
     engine: "PPTX ZIP/XML reader"
   }),
   recipe({
+    id: "archive-inspect",
+    input: ["archive"],
+    inputFormats: ["zip"],
+    category: "Archive",
+    output: "JSON report",
+    title: "Inspect ZIP contents",
+    description: "Report every file, size, compression method, expansion ratio, and optional SHA-256 checksum.",
+    treatments: ["File list", "Sizes", "Compression methods", "SHA-256"],
+    keywords: ["zip", "inspect", "list", "contents", "size", "ratio", "checksum", "sha256", "report"],
+    editorControls: ["metadata", "batchNaming"],
+    controlOptions: { metadata: ["File list", "File list + SHA-256"], batchNaming: ["Report suffix", "Clean filename"] },
+    requiredCapabilities: ["zip", "worker"],
+    intensity: "light",
+    engine: "Bounded zip.js reader + Web Crypto"
+  }),
+  recipe({
     id: "archive-extract",
     input: ["archive"],
+    inputFormats: ["zip"],
     category: "Archive",
-    output: "Files",
-    title: "Extract archive files",
-    description: "Inspect an archive and extract selected files.",
-    treatments: ["List contents", "Extract selected", "Nested warning"],
-    editorControls: ["metadata", "batchNaming", "bundle", "compression"],
+    output: "Extracted ZIP",
+    title: "Create extracted file bundle",
+    description: "Select ZIP entries by exact file or useful type group and place them in a clean export bundle.",
+    treatments: ["Exact file", "Type filters", "Manifest", "ZIP"],
+    keywords: ["zip", "extract", "unpack", "files", "images", "documents", "media", "selected"],
+    editorControls: ["archiveSelection", "metadata", "compression", "batchNaming"],
+    controlOptions: { archiveSelection: ["All files", "Top-level files", "Documents", "Images", "Audio and video"], metadata: ["Include manifest", "Files only"], compression: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"], batchNaming: ["Extracted suffix", "Clean filename"] },
     requiredCapabilities: ["zip", "worker"],
     intensity: "standard",
-    engine: "zip.js / fflate"
+    engine: "Bounded zip.js reader/writer"
   }),
   recipe({
     id: "archive-repack-zip",
     input: ["archive"],
+    inputFormats: ["zip"],
     category: "Archive",
     output: "ZIP",
     title: "Repack archive as ZIP",
-    description: "Normalize names, remove unwanted files, and repack as ZIP.",
-    treatments: ["Repack", "Rename", "Compress", "Manifest"],
-    editorControls: ["metadata", "batchNaming", "compression", "bundle"],
+    description: "Recompress a ZIP, optionally remove operating-system junk, and add a collision-safe manifest.",
+    treatments: ["Repack", "OS junk cleanup", "Compression", "Manifest"],
+    keywords: ["zip", "repack", "recompress", "clean", "macos", "ds store", "thumbs", "manifest"],
+    editorControls: ["metadata", "compression", "batchNaming"],
+    controlOptions: { metadata: ["Remove OS junk + manifest", "Keep all + manifest", "Remove OS junk, files only"], compression: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"], batchNaming: ["Repacked suffix", "Clean filename"] },
     requiredCapabilities: ["zip", "worker"],
     intensity: "standard",
-    engine: "zip.js / fflate"
+    engine: "Bounded zip.js reader/writer"
   }),
   recipe({
     id: "font-web-pack",
@@ -910,36 +1183,41 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "ebook-to-text",
     input: ["ebook"],
-    category: "Ebook",
-    output: "TXT / Markdown / HTML",
-    title: "Ebook to readable text",
-    description: "Extract ebook chapters into TXT, Markdown, HTML, or a ZIP bundle.",
-    treatments: ["Chapters", "Text", "HTML", "Markdown"],
-    editorControls: ["outputFormat", "pageOrder", "metadata", "batchNaming", "bundle"],
-    controlOptions: { outputFormat: ["TXT", "Markdown", "HTML", "ZIP by chapter"] },
+    inputFormats: ["epub"],
+    category: "Readable export",
+    output: "TXT / Markdown / HTML / chapter ZIP",
+    title: "EPUB to readable chapters",
+    description: "Follow the EPUB reading-order spine and export sanitized chapters as text, Markdown, HTML, or individual chapter files.",
+    treatments: ["Reading-order spine", "Sanitized HTML", "Chapter files", "Manifest"],
+    keywords: ["epub", "ebook", "book", "chapter", "read", "text", "txt", "markdown", "md", "html", "extract", "split", "zip"],
+    editorControls: ["outputFormat", "metadata", "batchNaming", "bundle"],
+    controlOptions: {
+      outputFormat: ["Markdown", "TXT", "Sanitized HTML", "Text ZIP by chapter", "HTML ZIP by chapter"],
+      metadata: ["Include chapter labels", "Content only"],
+      batchNaming: ["Converted suffix", "Clean filename"],
+      bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"]
+    },
     requiredCapabilities: ["zip", "worker"],
     intensity: "standard",
-    engine: "EPUB ZIP/XML reader"
+    engine: "zip.js + EPUB container/OPF spine reader"
   }),
   recipe({
     id: "application-compress-zip",
     input: ["application"],
     category: "Compression",
     output: "Compressed ZIP",
-    title: "Compress application package",
-    description: "Package an executable, installer, or app binary into a compressed ZIP with a checksum manifest.",
+    title: "Compress application or binary",
+    description: "Preserve an executable, installer, application package, or binary inside a level-selectable ZIP with SHA-256 and an exact ratio report.",
     treatments: ["Maximum ZIP compression", "SHA-256 checksum", "Manifest", "Original preserved"],
     keywords: ["exe", "msi", "installer", "app", "apk", "dmg", "binary", "compress", "zip", "checksum", "package"],
-    editorControls: ["compression", "metadata", "batchNaming", "bundle"],
+    editorControls: ["compression", "batchNaming"],
     controlOptions: {
-      compression: ["Maximum Deflate", "Balanced ZIP", "Store only"],
-      metadata: ["Checksum manifest", "Inspect report", "Keep source metadata"],
-      batchNaming: ["Keep source name", "Clean filename", "Version suffix", "Custom pattern"],
-      bundle: ["ZIP with manifest", "ZIP with README", "Single compressed ZIP"]
+      compression: ["Maximum ZIP", "Balanced ZIP", "Store ZIP"],
+      batchNaming: ["Compressed suffix", "Clean filename"]
     },
     requiredCapabilities: ["zip", "worker"],
     intensity: "standard",
-    engine: "fflate ZIP + Web Crypto"
+    engine: "zip.js + Web Crypto"
   })
 ];
 

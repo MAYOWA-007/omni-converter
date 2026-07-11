@@ -1,4 +1,10 @@
 import type { FileFamily, FileInspection } from "./types";
+import { inspectFileHeader } from "../core/inspection";
+import { normalizeArchivePath } from "../core/archivePaths";
+import { inspectMediaContainer } from "./mediaInspection";
+
+const MAX_PDF_ANALYSIS_BYTES = 128 * 1024 * 1024;
+const MAX_XLSX_ANALYSIS_BYTES = 64 * 1024 * 1024;
 
 const EXTENSION_FAMILY: Record<string, FileFamily> = {
   png: "image",
@@ -77,29 +83,96 @@ const EXTENSION_FAMILY: Record<string, FileFamily> = {
 
 export async function inspectFile(file: File): Promise<FileInspection> {
   const extension = file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() ?? "" : "";
-  const family = inferFamily(file.type, extension);
+  const detected = await inspectFileHeader(file);
+  const detectedFamily = detected.format.family === "unknown" ? inferFamily(file.type, extension) : detected.format.family;
+  const family = isApplicationPackageExtension(extension) && (detected.format.id === "unknown" || detected.format.id === "zip") ? "application" : detectedFamily;
+  const notes = [...detected.risk.reasons];
+  if (detected.format.id !== "unknown" && extension && !detected.format.extensions.includes(extension)) {
+    notes.push(`File extension .${extension} does not match detected ${detected.format.label} content.`);
+  }
   const inspection: FileInspection = {
     name: file.name,
     extension,
     mime: file.type || "unknown",
     size: file.size,
     family,
-    notes: []
+    exactFormat: detected.format.id,
+    signatureSource: detected.source,
+    riskBlocked: detected.risk.blocked,
+    riskReasons: detected.risk.reasons,
+    notes
   };
 
   if (family === "image" && file.type !== "image/svg+xml") {
-    return { ...inspection, ...(await inspectImage(file)) };
+    return mergeMetadata(inspection, await inspectImage(file));
+  }
+
+  if (family === "pdf") {
+    return mergeMetadata(inspection, await inspectPdf(file));
+  }
+
+  if (family === "spreadsheet" && detected.format.id === "xlsx") {
+    return mergeMetadata(inspection, await inspectWorkbook(file));
+  }
+
+  if (family === "presentation" && detected.format.id === "pptx") {
+    const slides = detected.archiveEntries?.filter((entry) => /^ppt\/slides\/slide\d+\.xml$/i.test(entry.name.replace(/\\/g, "/"))).length;
+    return mergeMetadata(inspection, slides ? { slides, notes: [`Presentation slides detected: ${slides}.`] } : {});
+  }
+
+  if (family === "archive" && detected.format.id === "zip") {
+    const archiveEntries = detected.archiveEntries?.flatMap((entry) => {
+      if (entry.directory) return [];
+      try {
+        return [{ name: normalizeArchivePath(entry.name), size: entry.uncompressedSize }];
+      } catch {
+        return [];
+      }
+    }) ?? [];
+    return mergeMetadata(inspection, { archiveEntries, notes: [`ZIP files detected: ${archiveEntries.length}.`] });
   }
 
   if (family === "video") {
-    return { ...inspection, ...(await inspectMedia(file, "video")) };
+    return mergeMetadata(inspection, await inspectMediaContainer(file, "video"));
   }
 
   if (family === "audio") {
-    return { ...inspection, ...(await inspectMedia(file, "audio")) };
+    return mergeMetadata(inspection, await inspectMediaContainer(file, "audio"));
   }
 
   return inspection;
+}
+
+async function inspectPdf(file: File): Promise<Partial<FileInspection>> {
+  if (file.size > MAX_PDF_ANALYSIS_BYTES) {
+    return { notes: ["PDF page count will be read when conversion starts."] };
+  }
+
+  try {
+    const { PDFDocument } = await import("pdf-lib");
+    const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true, updateMetadata: false });
+    const pages = pdf.getPageCount();
+    return { pages, notes: [`PDF pages detected: ${pages}.`] };
+  } catch {
+    return { notes: ["PDF page count could not be read during analysis."] };
+  }
+}
+
+async function inspectWorkbook(file: File): Promise<Partial<FileInspection>> {
+  if (file.size > MAX_XLSX_ANALYSIS_BYTES) {
+    return { notes: ["Workbook sheets will be read when conversion starts."] };
+  }
+  try {
+    const { default: readWorkbook } = await import("read-excel-file/browser");
+    const sheets = (await readWorkbook(file, { trim: false })).map((sheet) => sheet.sheet);
+    return { sheets, notes: [`Workbook sheets detected: ${sheets.length}.`] };
+  } catch {
+    return { notes: ["Workbook sheet names could not be read during analysis."] };
+  }
+}
+
+function mergeMetadata(inspection: FileInspection, metadata: Partial<FileInspection>): FileInspection {
+  return { ...inspection, ...metadata, notes: [...inspection.notes, ...(metadata.notes ?? [])] };
 }
 
 function inferFamily(mime: string, extension: string): FileFamily {
@@ -137,30 +210,6 @@ async function inspectImage(file: File): Promise<Partial<FileInspection>> {
   } finally {
     URL.revokeObjectURL(url);
   }
-}
-
-async function inspectMedia(file: File, kind: "audio" | "video"): Promise<Partial<FileInspection>> {
-  const url = URL.createObjectURL(file);
-  const element = document.createElement(kind);
-  element.preload = "metadata";
-  element.src = url;
-
-  return new Promise((resolve) => {
-    const cleanup = () => URL.revokeObjectURL(url);
-    element.onloadedmetadata = () => {
-      cleanup();
-      resolve({
-        duration: Number.isFinite(element.duration) ? element.duration : undefined,
-        width: kind === "video" ? (element as HTMLVideoElement).videoWidth : undefined,
-        height: kind === "video" ? (element as HTMLVideoElement).videoHeight : undefined,
-        notes: [`${kind === "video" ? "Video" : "Audio"} metadata loaded.`]
-      });
-    };
-    element.onerror = () => {
-      cleanup();
-      resolve({ notes: [`Browser could not fully decode metadata for this ${kind}.`] });
-    };
-  });
 }
 
 export function formatBytes(bytes: number) {

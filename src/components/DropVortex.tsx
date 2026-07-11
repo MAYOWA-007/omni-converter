@@ -1,5 +1,5 @@
 import { Upload } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 const VortexScene = lazy(() => import("./VortexScene").then((module) => ({ default: module.VortexScene })));
 
@@ -13,6 +13,7 @@ interface DropVortexProps {
 export function DropVortex({ active, fileLoaded, onFile, onDragActive }: DropVortexProps) {
   const [hovered, setHovered] = useState(false);
   const [showVortex, setShowVortex] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const idleWindow = window as Window &
@@ -90,12 +91,20 @@ export function DropVortex({ active, fileLoaded, onFile, onDragActive }: DropVor
       )}
       <label
         className="drop-core"
+        tabIndex={0}
+        aria-label="Drop any file"
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onFocus={() => setHovered(true)}
         onBlur={() => setHovered(false)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
       >
-        <input type="file" onChange={(event) => handleFiles(event.target.files)} />
+        <input ref={inputRef} type="file" onChange={(event) => handleFiles(event.target.files)} />
         <span className="drop-copy">
           <Upload size={18} strokeWidth={1.6} />
           Drop any file
