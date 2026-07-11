@@ -82,13 +82,15 @@ export function DropVortex({ active, fileLoaded, onFile, onDragActive }: DropVor
         handleFiles(event.dataTransfer.files);
       }}
     >
-      {showVortex ? (
-        <Suspense fallback={<div className="vortex-canvas vortex-fallback" aria-hidden="true" />}>
-          <VortexScene active={active || hovered} fileLoaded={fileLoaded} />
-        </Suspense>
-      ) : (
-        <div className="vortex-canvas vortex-fallback" aria-hidden="true" />
-      )}
+      <div className="vortex-shell">
+        {showVortex ? (
+          <Suspense fallback={<div className="vortex-canvas vortex-fallback" aria-hidden="true" />}>
+            <VortexScene active={active || hovered} fileLoaded={fileLoaded} />
+          </Suspense>
+        ) : (
+          <div className="vortex-canvas vortex-fallback" aria-hidden="true" />
+        )}
+      </div>
       <label
         className="drop-core"
         tabIndex={0}

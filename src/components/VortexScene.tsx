@@ -41,8 +41,8 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
         const { BufferGeometry, Color, Float32BufferAttribute, LineBasicMaterial, LineSegments, PerspectiveCamera, Scene, WebGLRenderer } = await import("three");
         if (disposed) return;
 
-        const renderer = new WebGLRenderer({ alpha: true, antialias: true, canvas: canvasElement, powerPreference: "low-power", preserveDrawingBuffer: true });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 720 ? 1 : 1.25));
+        const renderer = new WebGLRenderer({ alpha: true, antialias: true, canvas: canvasElement });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 720 ? 1 : 1.15));
         const scene = new Scene();
         const camera = new PerspectiveCamera(34, 1, 0.1, 100);
         camera.position.z = 4.15;
@@ -55,6 +55,7 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
         let lastFrame = 0;
         let running = false;
         let resourcesDisposed = false;
+        let appearance = "";
 
         function render(elapsed: number) {
           const state = activityRef.current;
@@ -62,8 +63,12 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
           sphere.rotation.y = elapsed * 0.00028 * energy;
           sphere.rotation.x = 0.2 + Math.sin(elapsed * 0.00014) * 0.12;
           sphere.rotation.z = elapsed * 0.00006;
-          material.color.set(state.active ? "#f0d28a" : state.fileLoaded ? "#9fcbb1" : "#e8c979");
-          material.opacity = state.active ? 0.92 : 0.74;
+          const nextAppearance = state.active ? "active" : state.fileLoaded ? "loaded" : "idle";
+          if (nextAppearance !== appearance) {
+            appearance = nextAppearance;
+            material.color.set(state.active ? "#f0d28a" : state.fileLoaded ? "#9fcbb1" : "#e8c979");
+            material.opacity = state.active ? 0.92 : 0.74;
+          }
           renderer.render(scene, camera);
         }
 
@@ -75,16 +80,17 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
           camera.aspect = width / height;
           camera.updateProjectionMatrix();
           const visibleHeight = 2 * Math.tan((camera.fov * Math.PI) / 360) * camera.position.z;
-          const diameter = Math.min(width, height) * 0.52;
+          const diameter = Math.min(width, height) * 0.9;
           sphere.scale.setScalar((diameter / height) * visibleHeight / 2.68);
           render(0);
         }
 
         function tick(now: number) {
           if (disposed || resourcesDisposed || document.hidden || reducedMotion) return;
-          const targetFps = activityRef.current.active ? 30 : 18;
-          if (now - lastFrame >= 1000 / targetFps) {
-            lastFrame = now;
+          const targetFps = 60;
+          const frameInterval = 1000 / targetFps;
+          if (now - lastFrame >= frameInterval - 1) {
+            lastFrame = now - ((now - lastFrame) % frameInterval);
             render(now);
             stats.frames += 1;
           }

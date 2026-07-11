@@ -119,6 +119,43 @@ test("keeps long-task budgets after the lazy Three upgrade", async ({ page }) =>
   expect(metrics?.longTasks.slice(observedBeforeProbe).some((duration) => duration >= 50)).toBe(true);
 });
 
+test("keeps the animated drop scene on compact compositor surfaces at a smooth cadence", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/");
+  const canvas = page.locator("canvas[data-vortex-scene]");
+  await expect(canvas).toBeVisible({ timeout: 5_000 });
+  await expect.poll(() => page.evaluate(() => window.__omniVortex?.frames ?? 0), { timeout: 5_000 }).toBeGreaterThan(1);
+
+  const startingFrames = await page.evaluate(() => window.__omniVortex?.frames ?? 0);
+  await page.waitForTimeout(2_000);
+  const metrics = await page.evaluate(() => {
+    const canvasNode = document.querySelector<HTMLCanvasElement>("canvas[data-vortex-scene]");
+    const app = document.querySelector<HTMLElement>(".app-shell");
+    if (!canvasNode || !app) throw new Error("Drop scene is unavailable.");
+    const context = canvasNode.getContext("webgl2") ?? canvasNode.getContext("webgl");
+    const canvasBounds = canvasNode.getBoundingClientRect();
+    const background = getComputedStyle(app, "::before");
+    return {
+      backgroundFilter: background.filter,
+      backgroundHeight: Number.parseFloat(background.height),
+      canvasBufferArea: canvasNode.width * canvasNode.height,
+      canvasHeight: canvasBounds.height,
+      canvasWidth: canvasBounds.width,
+      frames: window.__omniVortex?.frames ?? 0,
+      preserveDrawingBuffer: context?.getContextAttributes()?.preserveDrawingBuffer
+    };
+  });
+
+  expect(metrics.frames - startingFrames).toBeGreaterThanOrEqual(90);
+  expect(metrics.canvasWidth).toBeLessThanOrEqual(600);
+  expect(metrics.canvasHeight).toBeLessThanOrEqual(600);
+  expect(metrics.canvasBufferArea).toBeLessThanOrEqual(600_000);
+  expect(metrics.preserveDrawingBuffer).toBe(false);
+  expect(metrics.backgroundHeight).toBeLessThanOrEqual(901);
+  expect(metrics.backgroundFilter).toBe("none");
+});
+
 test("uses three columns for six controls at a wide viewport without overflow", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto("/omni-converter/tests/e2e/harness.html?mode=controls-six");
@@ -188,19 +225,19 @@ test("keeps the sphere nonblank and changes frames when motion is allowed", asyn
   const canvas = page.locator("canvas[data-vortex-scene]");
   await expect(canvas).toBeVisible({ timeout: 5_000 });
   await expect.poll(() => page.evaluate(() => window.__omniVortex?.frames ?? 0), { timeout: 5_000 }).toBeGreaterThan(1);
-  const firstFrame = await canvas.evaluate((node) => (node as HTMLCanvasElement).toDataURL());
+  const firstFrame = await canvas.screenshot();
   await page.waitForTimeout(250);
-  const secondFrame = await canvas.evaluate((node) => (node as HTMLCanvasElement).toDataURL());
-  expect(secondFrame).not.toBe(firstFrame);
-  const hasVisiblePixels = await canvas.evaluate((node) => {
-    const canvasNode = node as HTMLCanvasElement;
-    const context = canvasNode.getContext("webgl2") ?? canvasNode.getContext("webgl");
-    if (!context) return false;
-    const pixels = new Uint8Array(canvasNode.width * canvasNode.height * 4);
-    context.readPixels(0, 0, canvasNode.width, canvasNode.height, context.RGBA, context.UNSIGNED_BYTE, pixels);
-    return pixels.some((value, index) => index % 4 === 3 && value > 0);
+  const secondFrame = await canvas.screenshot();
+  expect(secondFrame.equals(firstFrame)).toBe(false);
+
+  const bounds = await canvas.boundingBox();
+  expect(bounds).not.toBeNull();
+  const visibleFrame = await page.screenshot({ clip: bounds! });
+  await canvas.evaluate((node) => {
+    node.style.visibility = "hidden";
   });
-  expect(hasVisiblePixels).toBe(true);
+  const frameWithoutCanvas = await page.screenshot({ clip: bounds! });
+  expect(frameWithoutCanvas.equals(visibleFrame)).toBe(false);
 });
 
 test("holds a static reduced-motion frame and pauses after a hidden event", async ({ page }) => {

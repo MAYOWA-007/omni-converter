@@ -19,7 +19,7 @@
   --input-bg: rgba(13, 8, 9, 0.42);
   --button-fill: linear-gradient(180deg, #ad3439, #761d25);
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
-  --atlas-y: 0%;
+  --atlas-position: center 0%;
   --edge-shadow: 0.34;
   --top-glaze: rgba(255, 244, 222, 0.08);
   --bottom-glaze: rgba(19, 7, 10, 0.2);
@@ -83,11 +83,11 @@ a {
 }
 
 .stage-drop {
-  --atlas-y: 0%;
+  --atlas-position: center 0%;
 }
 
 .stage-analyzing {
-  --atlas-y: -25%;
+  --atlas-position: center 33.333%;
   --ink: #342a20;
   --ink-strong: #18120d;
   --dim: #5c4d3f;
@@ -111,7 +111,7 @@ a {
 
 .stage-choose,
 .stage-processing {
-  --atlas-y: -50%;
+  --atlas-position: center 66.667%;
   --ink: #f1eee5;
   --ink-strong: #fffaf0;
   --dim: #c6beb0;
@@ -135,7 +135,7 @@ a {
 
 .stage-edit,
 .stage-results {
-  --atlas-y: -75%;
+  --atlas-position: center 100%;
   --ink: #f3f4e8;
   --ink-strong: #fff9e8;
   --dim: #d2d6c5;
@@ -166,24 +166,11 @@ a {
 }
 
 .app-shell::before {
-  top: 0;
-  bottom: auto;
   z-index: 0;
-  height: 400%;
   background-image: url("/omni-converter/assets/backgrounds/omni-limewash-atlas-2k.webp");
-  background-position: center top;
+  background-position: var(--atlas-position);
   background-repeat: no-repeat;
-  background-size: 100% 100%;
-  filter: var(--field-filter);
-  transform: translate3d(0, var(--atlas-y), 0);
-  transition: transform 1150ms cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
-}
-
-@media (min-width: 1800px) {
-  .app-shell::before {
-    background-image: url("/omni-converter/assets/backgrounds/omni-limewash-atlas-4k.webp");
-  }
+  background-size: 100% 400%;
 }
 
 .app-shell::after {
@@ -358,6 +345,15 @@ a {
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+.vortex-shell {
+  position: absolute;
+  display: grid;
+  width: min(58vmin, 580px);
+  aspect-ratio: 1;
+  place-items: center;
+  pointer-events: none;
 }
 
 .vortex-fallback {
@@ -1587,7 +1583,7 @@ a {
 }
 
 .vortex-fallback::before {
-  width: min(52vmin, 520px);
+  width: 90%;
   aspect-ratio: 1;
   border: 1px solid rgba(243, 220, 157, 0.5);
   border-radius: 50%;
