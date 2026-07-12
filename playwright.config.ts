@@ -2,7 +2,9 @@ import { defineConfig } from "playwright/test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  workers: 3,
+  // Media suites can each hold multiple encoder WASM modules. Serializing them
+  // on shared CI runners prevents Chromium from being killed under peak load.
+  workers: process.env.CI ? 1 : 3,
   timeout: 30_000,
   projects: [
     {
