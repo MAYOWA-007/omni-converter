@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - name: Checkout
@@ -33,7 +33,7 @@ jobs:
         run: npm ci
 
       - name: Install Chromium
-        run: npx playwright install chromium
+        run: npx playwright install --with-deps chromium
 
       - name: Verify public release
         shell: pwsh
