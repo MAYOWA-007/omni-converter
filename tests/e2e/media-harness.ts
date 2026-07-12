@@ -107,7 +107,7 @@ async function executeMediaRecipe(file: File, recipeId: string, overrides: Conve
         type: output.blob.type,
         bytes: [...new Uint8Array(await output.blob.arrayBuffer())],
         text: /(?:text|json|svg)/i.test(output.blob.type) ? await output.blob.text() : undefined,
-        validation: { valid: validation.valid, detectedFormat: validation.detectedFormat }
+        validation: { valid: validation.valid, detectedFormat: validation.detectedFormat, expectedFormat: validation.expectedFormat, errors: validation.errors }
       };
     }))
   };
@@ -177,6 +177,45 @@ function inspectWav(bytes: number[]) {
   };
 }
 
+async function cancelFfmpegAudioConversion() {
+  const recipe = CONVERSION_RECIPES.find((entry) => entry.id === "audio-to-vorbis");
+  if (!recipe) throw new Error("Verified Vorbis recipe is missing.");
+  const file = new File([createSineWavBytes(90, 48_000, 2)], "Long Tone.wav", { type: "audio/wav" });
+  const controller = new AbortController();
+  const progress: number[] = [];
+  try {
+    await convertRecipe(file, await inspectFile(file), recipe, {
+      trim: "Full file",
+      sampleRate: "48 kHz",
+      audioChannels: "Stereo",
+      compression: "320 kbps",
+      metadata: "Strip tags",
+      batchNaming: "Converted suffix"
+    }, {
+      signal: controller.signal,
+      reportProgress: (value) => {
+        const completed = value.completed ?? 0;
+        progress.push(completed);
+        if (completed > 10 && !controller.signal.aborted) controller.abort();
+      }
+    });
+    return { canceled: false, progress };
+  } catch (error) {
+    return { canceled: controller.signal.aborted, error: error instanceof Error ? error.name : "UnknownError", progress };
+  }
+}
+
+function inspectFlac(bytes: number[]) {
+  const data = Uint8Array.from(bytes);
+  return {
+    signature: ascii(data, 0, 4),
+    sampleRate: (data[18] << 12) | (data[19] << 4) | (data[20] >> 4),
+    channels: ((data[20] >> 1) & 7) + 1,
+    bitsPerSample: (((data[20] & 1) << 4) | (data[21] >> 4)) + 1,
+    totalBytes: data.length
+  };
+}
+
 async function unzip(bytes: number[]) {
   const reader = new ZipReader(new BlobReader(new Blob([Uint8Array.from(bytes)], { type: "application/zip" })), { checkSignature: true, checkOverlappingEntry: true });
   try {
@@ -213,7 +252,9 @@ declare global {
       runMediaFormat: typeof runMediaFormat;
       runVideoFixture: typeof runVideoFixture;
       cancelWavConversion: typeof cancelWavConversion;
+      cancelFfmpegAudioConversion: typeof cancelFfmpegAudioConversion;
       inspectWav: typeof inspectWav;
+      inspectFlac: typeof inspectFlac;
       inspectOutputMedia: typeof inspectOutputMedia;
       inspectVideoFixture: typeof inspectVideoFixture;
       inspectRaster: typeof inspectRaster;
@@ -222,5 +263,5 @@ declare global {
   }
 }
 
-window.__omniMediaHarness = { inspectFixture, inspectFormat, probeEncoders, runMediaRecipe, runMediaFormat, runVideoFixture, cancelWavConversion, inspectWav, inspectOutputMedia, inspectVideoFixture, inspectRaster, unzip };
+window.__omniMediaHarness = { inspectFixture, inspectFormat, probeEncoders, runMediaRecipe, runMediaFormat, runVideoFixture, cancelWavConversion, cancelFfmpegAudioConversion, inspectWav, inspectFlac, inspectOutputMedia, inspectVideoFixture, inspectRaster, unzip };
 document.getElementById("status")!.textContent = "ready";

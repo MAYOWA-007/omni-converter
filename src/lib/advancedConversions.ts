@@ -21,11 +21,9 @@ import { convertSpreadsheetToDelimited, convertSpreadsheetToJson, convertStructu
 import { convertDocxToHtml, convertDocxToMarkdown, convertPptxText, extractOfficeAssets } from "./officeConversions";
 import { compressApplicationPackage as compressApplicationToZip, createExtractedZip, inspectZipArchive, repackZipArchive } from "./archiveConversions";
 import { convertEpub } from "./ebookConversions";
+import { getFfmpegCoreAssets } from "./ffmpegRuntime";
 import type { ConversionRecipe, ConversionSettings, FileInspection } from "./types";
 import type { LegacyExecutionContext } from "../engines/types";
-
-const ffmpegCoreURL = `${import.meta.env?.BASE_URL ?? "/"}assets/ffmpeg/ffmpeg-core.js`;
-const ffmpegWasmURL = `${import.meta.env?.BASE_URL ?? "/"}assets/ffmpeg/ffmpeg-core.wasm`;
 
 const ADVANCED_RECIPE_IDS = new Set([
   "image-ocr-text",
@@ -38,7 +36,6 @@ const ADVANCED_RECIPE_IDS = new Set([
   "pdf-ocr-searchable",
   "pdf-compress",
   "video-to-gif",
-  "audio-to-mp3",
   "spreadsheet-to-csv",
   "spreadsheet-to-json",
   "spreadsheet-chart-pack",
@@ -105,8 +102,6 @@ async function convertAdvancedRecipeImpl(file: File, _inspection: FileInspection
       return [await compressPdf(file, baseName, settings)];
     case "video-to-gif":
       return [await transcodeWithFfmpeg(file, baseName, "gif", settings)];
-    case "audio-to-mp3":
-      return [await transcodeWithFfmpeg(file, baseName, "mp3", settings)];
     case "spreadsheet-to-csv":
       return [await convertSpreadsheetToDelimited(file, baseName, settings)];
     case "spreadsheet-to-json":
@@ -560,7 +555,7 @@ async function runFfmpeg(input: File | Blob, inputName: string, outputName: stri
   const { FFmpeg } = await import("@ffmpeg/ffmpeg");
   const { fetchFile } = await import("@ffmpeg/util");
   const ffmpeg = new FFmpeg();
-  await ffmpeg.load({ coreURL: ffmpegCoreURL, wasmURL: ffmpegWasmURL });
+  await ffmpeg.load(await getFfmpegCoreAssets());
   try {
     await ffmpeg.writeFile(inputName, await fetchFile(input));
     const code = await ffmpeg.exec(args, 180_000);

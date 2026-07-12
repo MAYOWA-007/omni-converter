@@ -91,6 +91,63 @@ test("blocks a projected WAV that cannot fit the current in-memory export path",
   });
 });
 
+test("blocks a projected all-audio-format bundle before local memory exhaustion", () => {
+  const bundleRecipe = CONVERSION_RECIPES.find((entry) => entry.id === "audio-format-bundle")!;
+  const audioDevice: DeviceProfile = {
+    cores: 12,
+    memoryGb: 32,
+    supports: { audio: true, webcodecs: true, wasm: true, worker: true, zip: true } as Record<Capability, boolean>
+  };
+  const inspection: FileInspection = {
+    name: "archive-master.wav",
+    extension: "wav",
+    mime: "audio/wav",
+    size: 120_000_000,
+    family: "audio",
+    exactFormat: "wav",
+    duration: 8 * 60 * 60,
+    sampleRate: 48_000,
+    audioChannels: 2,
+    notes: []
+  };
+
+  expect(preflightRecipe(bundleRecipe, inspection, audioDevice, {
+    trim: "Full file",
+    sampleRate: "48 kHz",
+    audioChannels: "Stereo",
+    bitDepth: "24-bit lossless",
+    compression: "320 kbps"
+  })).toMatchObject({
+    status: "blocked",
+    reasons: expect.arrayContaining(["This output is too large for the current browser export path."])
+  });
+});
+
+test("preflights FFmpeg audio routes from the selected representation and device support", () => {
+  const aiffRecipe = CONVERSION_RECIPES.find((entry) => entry.id === "audio-to-aiff")!;
+  const inspection: FileInspection = {
+    name: "master.wav", extension: "wav", mime: "audio/wav", size: 120_000_000, family: "audio", exactFormat: "wav", duration: 4 * 60 * 60, sampleRate: 48_000, audioChannels: 2, notes: []
+  };
+  const capable: DeviceProfile = {
+    cores: 12,
+    memoryGb: 16,
+    supports: { audio: true, wasm: true, worker: true } as Record<Capability, boolean>
+  };
+
+  expect(preflightRecipe(aiffRecipe, inspection, capable, {
+    trim: "Full file", sampleRate: "96 kHz", audioChannels: "Stereo", bitDepth: "32-bit float"
+  })).toMatchObject({
+    status: "blocked",
+    reasons: expect.arrayContaining(["This output is too large for the current browser export path."])
+  });
+
+  const short = { ...inspection, size: 32_044, duration: 2, sampleRate: 8_000, audioChannels: 1 };
+  expect(preflightRecipe(aiffRecipe, short, capable, {
+    trim: "Full file", sampleRate: "Source sample rate", audioChannels: "Source channels", bitDepth: "16-bit PCM"
+  }).status).toBe("ready");
+  expect(preflightRecipe(aiffRecipe, short, { cores: 8, supports: { audio: true, wasm: false, worker: false } as Record<Capability, boolean> }).status).toBe("blocked");
+});
+
 test("blocks audio-to-video when this device exposes no compatible encoder pair", () => {
   const videoRecipe = CONVERSION_RECIPES.find((entry) => entry.id === "audio-to-video")!;
   const audioDevice: DeviceProfile = { cores: 8, memoryGb: 8, supports: { audio: true, canvas: true, webcodecs: true, worker: true } as Record<Capability, boolean> };
@@ -112,6 +169,41 @@ test("blocks audio-to-video when this device exposes no compatible encoder pair"
     status: "blocked",
     reasons: ["This device cannot encode the available video formats."]
   });
+});
+
+test("blocks Opus output before conversion when the device exposes no Opus encoder", () => {
+  const opusRecipe = CONVERSION_RECIPES.find((entry) => entry.id === "audio-to-opus")!;
+  const audioDevice: DeviceProfile = {
+    cores: 8,
+    memoryGb: 8,
+    supports: { audio: true, webcodecs: true, worker: true, opusEncoder: false } as Record<Capability, boolean>
+  };
+  const inspection: FileInspection = {
+    name: "tone.wav", extension: "wav", mime: "audio/wav", size: 32_044, family: "audio", exactFormat: "wav", duration: 2, sampleRate: 8_000, audioChannels: 1, notes: []
+  };
+
+  expect(preflightRecipe(opusRecipe, inspection, audioDevice)).toMatchObject({
+    status: "blocked",
+    reasons: ["This device cannot encode Opus audio."]
+  });
+});
+
+test("requires an M4R selection to fit the ringtone duration limit", () => {
+  const ringtoneRecipe = CONVERSION_RECIPES.find((entry) => entry.id === "audio-to-m4r")!;
+  const audioDevice: DeviceProfile = {
+    cores: 8,
+    memoryGb: 8,
+    supports: { audio: true, wasm: true, worker: true } as Record<Capability, boolean>
+  };
+  const inspection: FileInspection = {
+    name: "song.wav", extension: "wav", mime: "audio/wav", size: 8_000_000, family: "audio", exactFormat: "wav", duration: 180, sampleRate: 48_000, audioChannels: 2, notes: []
+  };
+
+  expect(preflightRecipe(ringtoneRecipe, inspection, audioDevice, { trim: "Full file" })).toMatchObject({
+    status: "blocked",
+    reasons: ["Select 40 seconds or less for an M4R ringtone."]
+  });
+  expect(preflightRecipe(ringtoneRecipe, inspection, audioDevice, { trim: "First 30 seconds" }).status).toBe("ready");
 });
 
 test("evaluates long video transcodes from the selected trim and compression", () => {

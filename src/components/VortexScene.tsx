@@ -38,7 +38,25 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
 
     async function initialize() {
       try {
-        const { BufferGeometry, Color, Float32BufferAttribute, LineBasicMaterial, LineSegments, PerspectiveCamera, Scene, WebGLRenderer } = await import("three");
+        const [
+          { BufferGeometry },
+          { Float32BufferAttribute },
+          { PerspectiveCamera },
+          { Color },
+          { LineBasicMaterial },
+          { LineSegments },
+          { WebGLRenderer },
+          { Scene }
+        ] = await Promise.all([
+          import("three/src/core/BufferGeometry.js"),
+          import("three/src/core/BufferAttribute.js"),
+          import("three/src/cameras/PerspectiveCamera.js"),
+          import("three/src/math/Color.js"),
+          import("three/src/materials/LineBasicMaterial.js"),
+          import("three/src/objects/LineSegments.js"),
+          import("three/src/renderers/WebGLRenderer.js"),
+          import("three/src/scenes/Scene.js")
+        ]);
         if (disposed) return;
 
         const renderer = new WebGLRenderer({ alpha: true, antialias: true, canvas: canvasElement });

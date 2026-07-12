@@ -1,10 +1,24 @@
 import { baseFileName, canvasToBlob, escapeHtml, zipLevelFromCompression, zipOutputs, type ConversionOutput } from "./conversionHelpers";
+import { ensureAudioEncoder } from "./audioEncoders";
+import { canConvertFfmpegAudioRecipe, convertFfmpegAudioRecipe, FFMPEG_AUDIO_RECIPE_IDS } from "./ffmpegAudioConversions";
 import { resolveMediaTrimRange } from "./mediaTrim";
 import type { ConversionRecipe, ConversionSettings, FileInspection } from "./types";
 import type { LegacyExecutionContext } from "../engines/types";
 
 const MEDIA_RECIPE_IDS = new Set([
+  ...FFMPEG_AUDIO_RECIPE_IDS,
   "audio-to-wav",
+  "audio-to-mp3",
+  "audio-to-flac",
+  "audio-to-m4a",
+  "audio-to-aac",
+  "audio-to-ogg",
+  "audio-to-opus",
+  "audio-to-webm",
+  "audio-to-mka",
+  "audio-to-mov",
+  "audio-to-m4r",
+  "audio-format-bundle",
   "audio-waveform",
   "audio-to-video",
   "video-to-frames",
@@ -20,7 +34,7 @@ export function canConvertMediaRecipe(recipe: ConversionRecipe) {
 
 export async function convertMediaRecipe(
   file: File,
-  _inspection: FileInspection,
+  inspection: FileInspection,
   recipe: ConversionRecipe,
   settings: ConversionSettings = {},
   execution?: LegacyExecutionContext
@@ -29,33 +43,52 @@ export async function convertMediaRecipe(
   const baseName = baseFileName(file.name, "converted-media");
   execution?.reportProgress({ completed: 0, total: 100, label: "Reading media container" });
   let output: ConversionOutput;
-  switch (recipe.id) {
-    case "audio-to-wav":
-      output = await convertAudioToWav(file, baseName, settings, execution);
-      break;
-    case "audio-to-video":
-      output = await createAudioVideo(file, baseName, settings, execution);
-      break;
-    case "audio-waveform":
-      output = await createWaveformOutput(file, baseName, settings, execution);
-      break;
-    case "video-to-frames":
-      output = await createVideoFrames(file, baseName, settings, execution);
-      break;
-    case "video-thumbnail-sheet":
-      output = await createVideoContactSheet(file, baseName, settings, execution);
-      break;
-    case "video-to-mp4":
-      output = await transcodeVideo(file, baseName, settings, "mp4", execution);
-      break;
-    case "video-to-webm":
-      output = await transcodeVideo(file, baseName, settings, "webm", execution);
-      break;
-    case "video-to-audio":
-      output = await extractVideoAudio(file, baseName, settings, execution);
-      break;
-    default:
-      throw new Error("This media converter is not available.");
+  if (canConvertFfmpegAudioRecipe(recipe.id)) {
+    output = await convertFfmpegAudioRecipe(file, inspection, recipe.id, settings, execution);
+  } else {
+    switch (recipe.id) {
+      case "audio-to-wav":
+        output = await convertAudioToWav(file, baseName, settings, execution);
+        break;
+      case "audio-to-mp3":
+      case "audio-to-flac":
+      case "audio-to-m4a":
+      case "audio-to-aac":
+      case "audio-to-ogg":
+      case "audio-to-opus":
+      case "audio-to-webm":
+      case "audio-to-mka":
+      case "audio-to-mov":
+      case "audio-to-m4r":
+        output = await convertAudioToFormat(file, baseName, recipe.id, settings, execution);
+        break;
+      case "audio-format-bundle":
+        output = await createAudioFormatBundle(file, inspection, baseName, settings, execution);
+        break;
+      case "audio-to-video":
+        output = await createAudioVideo(file, baseName, settings, execution);
+        break;
+      case "audio-waveform":
+        output = await createWaveformOutput(file, baseName, settings, execution);
+        break;
+      case "video-to-frames":
+        output = await createVideoFrames(file, baseName, settings, execution);
+        break;
+      case "video-thumbnail-sheet":
+        output = await createVideoContactSheet(file, baseName, settings, execution);
+        break;
+      case "video-to-mp4":
+        output = await transcodeVideo(file, baseName, settings, "mp4", execution);
+        break;
+      case "video-to-webm":
+        output = await transcodeVideo(file, baseName, settings, "webm", execution);
+        break;
+      case "video-to-audio":
+        output = await extractVideoAudio(file, baseName, settings, execution);
+        break;
+      default:
+        throw new Error("This media converter is not available.");
+    }
   }
   throwIfAborted(execution?.signal);
   execution?.reportProgress({ completed: 100, total: 100, label: "Media conversion complete" });
@@ -103,6 +136,185 @@ async function convertAudioToWav(file: File, baseName: string, settings: Convers
   } finally {
     input.dispose();
   }
+}
+
+interface AudioTargetSpec {
+  codec: import("mediabunny").AudioCodec;
+  extension: string;
+  format: import("mediabunny").OutputFormat;
+  maxChannels: number;
+  mime: string;
+  preferredSampleRate?: number;
+  sampleFormat?: "s16" | "s32";
+}
+
+async function convertAudioToFormat(
+  file: File,
+  baseName: string,
+  recipeId: string,
+  settings: ConversionSettings,
+  execution?: LegacyExecutionContext
+): Promise<ConversionOutput> {
+  const media = await import("mediabunny");
+  const input = new media.Input({ source: new media.BlobSource(file), formats: media.ALL_FORMATS });
+  const target = new media.BufferTarget();
+  try {
+    if (!await input.canRead()) throw new Error("The audio container could not be parsed.");
+    const track = await input.getPrimaryAudioTrack();
+    if (!track) throw new Error("The media file has no readable audio track.");
+    const spec = audioTargetSpec(media, recipeId, settings);
+    const [sourceDuration, sourceChannels, sourceSampleRate] = await Promise.all([
+      input.computeDuration([track]),
+      track.getNumberOfChannels(),
+      track.getSampleRate()
+    ]);
+    const range = resolveMediaTrimRange(settings, sourceDuration);
+    const channels = channelCount(settings.audioChannels) ?? Math.min(spec.maxChannels, sourceChannels);
+    const sampleRate = sampleRateValue(settings.sampleRate) ?? spec.preferredSampleRate ?? sourceSampleRate;
+    const bitrate = audioBitrate(settings.compression, channels);
+    await ensureAudioEncoder(media, spec.codec, { numberOfChannels: channels, sampleRate, bitrate });
+
+    const output = new media.Output({ format: spec.format, target });
+    const conversion = await media.Conversion.init({
+      input,
+      output,
+      tracks: "primary",
+      video: { discard: true },
+      audio: {
+        codec: spec.codec,
+        sampleRate,
+        numberOfChannels: channels,
+        sampleFormat: spec.sampleFormat,
+        bitrate: isLosslessAudioCodec(spec.codec) ? undefined : bitrate,
+        forceTranscode: true
+      },
+      trim: { start: range.start, end: range.end },
+      tags: settings.metadata === "Strip tags" ? {} : undefined,
+      showWarnings: false
+    });
+    if (!conversion.isValid) {
+      throw new Error(`${spec.extension.toUpperCase()} conversion is unavailable: ${conversion.discardedTracks.map((entry) => entry.reason).join(", ") || "no usable audio track"}.`);
+    }
+    const cancel = () => void conversion.cancel();
+    execution?.signal.addEventListener("abort", cancel, { once: true });
+    conversion.onProgress = (progress) => execution?.reportProgress({ completed: 10 + progress * 85, total: 100, label: `Encoding ${spec.extension.toUpperCase()} audio` });
+    try {
+      await conversion.execute();
+    } catch (error) {
+      if (execution?.signal.aborted) throw new DOMException("Conversion was cancelled.", "AbortError");
+      throw error;
+    } finally {
+      execution?.signal.removeEventListener("abort", cancel);
+    }
+    if (!target.buffer) throw new Error(`${spec.extension.toUpperCase()} conversion produced no output bytes.`);
+    const suffix = settings.batchNaming === "Clean filename" ? "" : "-converted";
+    return { name: `${baseName}${suffix}.${spec.extension}`, blob: new Blob([target.buffer], { type: spec.mime }) };
+  } finally {
+    input.dispose();
+  }
+}
+
+async function createAudioFormatBundle(
+  file: File,
+  inspection: FileInspection,
+  baseName: string,
+  settings: ConversionSettings,
+  execution?: LegacyExecutionContext
+) {
+  const recipeIds = [
+    "audio-to-aac",
+    "audio-to-ac3",
+    "audio-to-aiff",
+    "audio-to-alac",
+    "audio-to-au",
+    "audio-to-caf",
+    "audio-to-eac3",
+    "audio-to-flac",
+    "audio-to-m4a",
+    "audio-to-m4r",
+    "audio-to-mka",
+    "audio-to-mov",
+    "audio-to-mp2",
+    "audio-to-mp3",
+    "audio-to-ogg",
+    "audio-to-opus",
+    "audio-to-pcm",
+    "audio-to-3gp",
+    "audio-to-tta",
+    "audio-to-vorbis",
+    "audio-to-wav",
+    "audio-to-wave64",
+    "audio-to-wavpack",
+    "audio-to-webm",
+    "audio-to-wma"
+  ];
+  const outputs: ConversionOutput[] = [];
+  const selectedRangeDuration = inspection.duration ? resolveMediaTrimRange(settings, inspection.duration).duration : 0;
+  for (let index = 0; index < recipeIds.length; index += 1) {
+    throwIfAborted(execution?.signal);
+    const reportProgress = execution && ((progress: Parameters<LegacyExecutionContext["reportProgress"]>[0]) => {
+      const completed = Math.max(0, Math.min(100, progress.completed ?? 0));
+      execution.reportProgress({ completed: ((index + completed / 100) / recipeIds.length) * 90, total: 100, label: `Building format ${index + 1} of ${recipeIds.length}` });
+    });
+    const nestedExecution = execution ? { ...execution, reportProgress: reportProgress! } : undefined;
+    const recipeId = recipeIds[index];
+    const nestedSettings = {
+      ...settings,
+      batchNaming: "Converted suffix",
+      ...(recipeId === "audio-to-m4r" && selectedRangeDuration > 30 ? { trim: "First 30 seconds" } : {})
+    };
+    outputs.push(recipeId === "audio-to-wav"
+      ? await convertAudioToWav(file, baseName, nestedSettings, nestedExecution)
+      : canConvertFfmpegAudioRecipe(recipeId)
+        ? await convertFfmpegAudioRecipe(file, inspection, recipeId, nestedSettings, nestedExecution)
+        : await convertAudioToFormat(file, baseName, recipeId, nestedSettings, nestedExecution));
+  }
+  outputs.push(jsonOutput("format-manifest.json", {
+    source: file.name,
+    outputs: outputs.map((output) => output.name),
+    rawPcm: {
+      file: outputs.find((output) => output.name.endsWith(".pcm"))?.name,
+      sampleFormat: settings.outputFormat ?? "16-bit little-endian",
+      sampleRate: settings.sampleRate ?? "Source sample rate",
+      channels: settings.audioChannels ?? "Source channels"
+    },
+    ringtone: "The M4R output is capped at the first 30 seconds when the selected range is longer."
+  }));
+  outputs.sort((left, right) => left.name.localeCompare(right.name));
+  return zipOutputs(`${baseName}-audio-formats.zip`, outputs, zipLevelFromCompression(settings.bundle));
+}
+
+function audioTargetSpec(media: typeof import("mediabunny"), recipeId: string, settings: ConversionSettings): AudioTargetSpec {
+  if (recipeId === "audio-to-mp3") return { codec: "mp3", extension: "mp3", format: new media.Mp3OutputFormat(), maxChannels: 2, mime: "audio/mpeg" };
+  if (recipeId === "audio-to-flac") return { codec: "flac", extension: "flac", format: new media.FlacOutputFormat(), maxChannels: 8, mime: "audio/flac", sampleFormat: settings.bitDepth === "24-bit lossless" ? "s32" : "s16" };
+  if (recipeId === "audio-to-m4a") return { codec: "aac", extension: "m4a", format: new media.Mp4OutputFormat({ fastStart: "in-memory" }), maxChannels: 8, mime: "audio/mp4" };
+  if (recipeId === "audio-to-aac") return { codec: "aac", extension: "aac", format: new media.AdtsOutputFormat(), maxChannels: 8, mime: "audio/aac" };
+  if (recipeId === "audio-to-ogg") return { codec: "opus", extension: "ogg", format: new media.OggOutputFormat(), maxChannels: 2, mime: "audio/ogg", preferredSampleRate: 48_000 };
+  if (recipeId === "audio-to-opus") return { codec: "opus", extension: "opus", format: new media.OggOutputFormat(), maxChannels: 2, mime: "audio/ogg", preferredSampleRate: 48_000 };
+  if (recipeId === "audio-to-webm") return { codec: "opus", extension: "webm", format: new media.WebMOutputFormat(), maxChannels: 2, mime: "audio/webm", preferredSampleRate: 48_000 };
+  if (recipeId === "audio-to-m4r") return { codec: "aac", extension: "m4r", format: new media.Mp4OutputFormat({ fastStart: "in-memory" }), maxChannels: 2, mime: "audio/mp4" };
+  if (recipeId === "audio-to-mov") {
+    const pcm = settings.outputFormat === "16-bit PCM in MOV";
+    return { codec: pcm ? "pcm-s16" : "aac", extension: "mov", format: new media.MovOutputFormat({ fastStart: "in-memory" }), maxChannels: 8, mime: "video/quicktime", sampleFormat: pcm ? "s16" : undefined };
+  }
+  if (recipeId === "audio-to-mka") {
+    const selected = settings.outputFormat ?? "Opus in MKA";
+    const codec = selected === "Opus in MKA" ? "opus" : selected === "AC-3 in MKA" ? "ac3" : selected === "E-AC-3 in MKA" ? "eac3" : "flac";
+    return {
+      codec,
+      extension: "mka",
+      format: new media.MkvOutputFormat(),
+      maxChannels: codec === "opus" ? 2 : codec === "ac3" || codec === "eac3" ? 6 : 8,
+      mime: "audio/x-matroska",
+      preferredSampleRate: 48_000,
+      sampleFormat: codec === "flac" ? settings.bitDepth === "24-bit lossless" ? "s32" : "s16" : undefined
+    };
+  }
+  throw new Error(`Unknown audio output recipe: ${recipeId}`);
+}
+
+function isLosslessAudioCodec(codec: import("mediabunny").AudioCodec) {
+  return codec === "flac" || codec.startsWith("pcm-");
 }
 
 async function createWaveformOutput(file: File, baseName: string, settings: ConversionSettings, execution?: LegacyExecutionContext): Promise<ConversionOutput> {
@@ -770,11 +982,13 @@ function videoQuality(media: typeof import("mediabunny"), value?: string) {
 }
 
 function audioBitrate(value: string | undefined, channels: number) {
-  const selected = value === "Maximum quality" ? 256_000
+  const explicitKbps = Number(value?.match(/(\d+)\s*kbps/i)?.[1]);
+  const selected = Number.isFinite(explicitKbps) && explicitKbps > 0 ? explicitKbps * 1000
+    : value === "Maximum quality" ? 256_000
     : value === "High quality" ? 192_000
       : value === "Small file" ? 96_000
         : 160_000;
-  return channels === 1 ? Math.min(128_000, selected) : selected;
+  return channels === 1 && !Number.isFinite(explicitKbps) ? Math.min(128_000, selected) : selected;
 }
 
 function even(value: number) {

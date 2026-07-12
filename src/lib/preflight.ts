@@ -10,7 +10,7 @@ declare global {
 
 export async function getDeviceProfile(): Promise<DeviceProfile> {
   const storage = await navigator.storage?.estimate?.().catch(() => undefined);
-  const [webpEncoder, avifEncoder] = await Promise.all([canEncodeImage("image/webp"), canEncodeImage("image/avif")]);
+  const [webpEncoder, avifEncoder, opusEncoder] = await Promise.all([canEncodeImage("image/webp"), canEncodeImage("image/avif"), canEncodeOpusAudio()]);
   const supports: Record<Capability, boolean> = {
     canvas: canUseCanvas(),
     webgl: canUseWebgl(),
@@ -28,6 +28,7 @@ export async function getDeviceProfile(): Promise<DeviceProfile> {
     image: true,
     webpEncoder,
     avifEncoder,
+    opusEncoder,
     audio: "AudioContext" in window || "webkitAudioContext" in window,
     video: Boolean(document.createElement("video").canPlayType)
   };
@@ -82,6 +83,11 @@ export function preflightRecipe(recipe: ConversionRecipe, inspection: FileInspec
     reasons.push("This browser and device do not expose a compatible MP4 or WebM encoder.");
   }
 
+  const ringtoneTooLong = recipe.id === "audio-to-m4r" && (selectedDuration(inspection.duration, settings) ?? 0) > 40;
+  if (ringtoneTooLong) {
+    reasons.push("Select 40 seconds or less for an M4R ringtone.");
+  }
+
   if (projectedOutput && device.memoryGb && projectedOutput > device.memoryGb * 1024 ** 3 * 0.2) {
     reasons.push("The projected output is too large for the memory reported by this device.");
   }
@@ -103,7 +109,7 @@ export function preflightRecipe(recipe: ConversionRecipe, inspection: FileInspec
     reasons.push("Large video files over 2.5 GB are blocked in this version.");
   }
 
-  if (missing.length || reasons.some((reason) => reason.includes("blocked") || reason.includes("Not enough") || reason.includes("exceeds") || reason.includes("too large") || reason.includes("do not expose"))) {
+  if (missing.length || ringtoneTooLong || reasons.some((reason) => reason.includes("blocked") || reason.includes("Not enough") || reason.includes("exceeds") || reason.includes("too large") || reason.includes("do not expose"))) {
     return {
       status: "blocked",
       label: "Unavailable",
@@ -125,6 +131,7 @@ function toUserReason(reason: string) {
   return reason
     .replace("This browser is missing: webpEncoder.", "This browser cannot export WebP images.")
     .replace("This browser is missing: avifEncoder.", "This browser cannot export AVIF images.")
+    .replace("This browser is missing: opusEncoder.", "This device cannot encode Opus audio.")
     .replace("Not enough browser storage headroom for temporary files and output bundles.", "There is not enough browser storage for this file.")
     .replace("Large video files over 2.5 GB are blocked in this version.", "This video is too large for this version.")
     .replace("The projected output exceeds the current safe in-memory export limit.", "This output is too large for the current browser export path.")
@@ -146,6 +153,31 @@ function estimateTime(recipe: ConversionRecipe, inspection: FileInspection, devi
   const mediaDuration = selectedDuration(inspection.duration, settings);
   const workFactors: Record<string, number> = {
     "audio-to-wav": 1.8,
+    "audio-to-mp3": 0.55,
+    "audio-to-flac": 0.8,
+    "audio-to-m4a": 0.65,
+    "audio-to-aac": 0.65,
+    "audio-to-ogg": 0.6,
+    "audio-to-opus": 0.6,
+    "audio-to-webm": 0.65,
+    "audio-to-mka": 0.75,
+    "audio-to-mov": 0.7,
+    "audio-to-m4r": 0.65,
+    "audio-to-aiff": 0.8,
+    "audio-to-alac": 1.1,
+    "audio-to-caf": 0.9,
+    "audio-to-ac3": 0.9,
+    "audio-to-eac3": 1,
+    "audio-to-vorbis": 1.1,
+    "audio-to-wma": 0.9,
+    "audio-to-wavpack": 1.2,
+    "audio-to-tta": 1.1,
+    "audio-to-mp2": 0.8,
+    "audio-to-au": 0.75,
+    "audio-to-wave64": 0.8,
+    "audio-to-pcm": 0.7,
+    "audio-to-3gp": 0.9,
+    "audio-format-bundle": 4.8,
     "audio-waveform": 0.55,
     "audio-to-video": 4.5,
     "video-to-frames": 1.4,
@@ -177,6 +209,67 @@ function projectedOutputBytes(recipe: ConversionRecipe, inspection: FileInspecti
     const channels = selectedChannelCount(settings?.audioChannels, inspection.audioChannels);
     const bytesPerSample = settings?.bitDepth === "24-bit PCM" ? 3 : settings?.bitDepth === "32-bit float" ? 4 : 2;
     return duration * sampleRate * channels * bytesPerSample + 128 * 1024;
+  }
+  if (recipe.id === "audio-format-bundle") {
+    const selectedSettings = settings ?? {};
+    const sampleRate = selectedSampleRate(selectedSettings.sampleRate, inspection.sampleRate);
+    const channels = selectedChannelCount(selectedSettings.audioChannels, inspection.audioChannels);
+    const wavBytes = duration * sampleRate * channels * (selectedSettings.bitDepth === "24-bit lossless" ? 3 : 2);
+    const compressedBytes = duration * projectedAudioBitrate(selectedSettings.compression, channels) / 8;
+    return wavBytes * 8 + compressedBytes * 15 + 8 * 1024 * 1024;
+  }
+  if (["audio-to-mp3", "audio-to-m4a", "audio-to-aac", "audio-to-ogg", "audio-to-opus", "audio-to-webm", "audio-to-m4r"].includes(recipe.id)) {
+    const selectedSettings = settings ?? {};
+    const channels = selectedChannelCount(selectedSettings.audioChannels, inspection.audioChannels);
+    return duration * projectedAudioBitrate(selectedSettings.compression, channels) / 8 + 256 * 1024;
+  }
+  if (recipe.id === "audio-to-flac") {
+    const selectedSettings = settings ?? {};
+    const sampleRate = selectedSampleRate(selectedSettings.sampleRate, inspection.sampleRate);
+    const channels = selectedChannelCount(selectedSettings.audioChannels, inspection.audioChannels);
+    const bytesPerSample = selectedSettings.bitDepth === "24-bit lossless" ? 3 : 2;
+    return duration * sampleRate * channels * bytesPerSample * 0.7 + 256 * 1024;
+  }
+  if (["audio-to-ac3", "audio-to-eac3", "audio-to-vorbis", "audio-to-wma", "audio-to-mp2", "audio-to-3gp"].includes(recipe.id)) {
+    const selectedSettings = settings ?? {};
+    const channels = selectedChannelCount(selectedSettings.audioChannels, inspection.audioChannels);
+    return duration * projectedAudioBitrate(selectedSettings.compression, channels) / 8 + 512 * 1024;
+  }
+  if (["audio-to-alac", "audio-to-wavpack", "audio-to-tta"].includes(recipe.id)) {
+    const selectedSettings = settings ?? {};
+    const sampleRate = selectedSampleRate(selectedSettings.sampleRate, inspection.sampleRate);
+    const channels = selectedChannelCount(selectedSettings.audioChannels, inspection.audioChannels);
+    const bytesPerSample = selectedSettings.bitDepth === "24-bit lossless" ? 3 : 2;
+    return duration * sampleRate * channels * bytesPerSample * 0.72 + 512 * 1024;
+  }
+  if (["audio-to-aiff", "audio-to-caf", "audio-to-au", "audio-to-wave64", "audio-to-pcm"].includes(recipe.id)) {
+    const selectedSettings = settings ?? {};
+    const sampleRate = selectedSampleRate(selectedSettings.sampleRate, inspection.sampleRate);
+    const channels = selectedChannelCount(selectedSettings.audioChannels, inspection.audioChannels);
+    const format = selectedSettings.outputFormat ?? "";
+    const bytesPerSample = format.includes("G.711") ? 1
+      : selectedSettings.bitDepth === "24-bit PCM" || format.includes("24-bit") ? 3
+        : selectedSettings.bitDepth === "32-bit float" || format.includes("32-bit float") ? 4
+          : 2;
+    const losslessFactor = recipe.id === "audio-to-caf" && format === "ALAC in CAF" ? 0.72 : 1;
+    return duration * sampleRate * channels * bytesPerSample * losslessFactor + 512 * 1024;
+  }
+  if (recipe.id === "audio-to-mka") {
+    const selectedSettings = settings ?? {};
+    const channels = selectedChannelCount(selectedSettings.audioChannels, inspection.audioChannels);
+    if (selectedSettings.outputFormat === "FLAC in MKA") {
+      const sampleRate = selectedSampleRate(selectedSettings.sampleRate, inspection.sampleRate);
+      return duration * sampleRate * channels * (selectedSettings.bitDepth === "24-bit lossless" ? 3 : 2) * 0.7 + 512 * 1024;
+    }
+    return duration * projectedAudioBitrate(selectedSettings.compression, channels) / 8 + 512 * 1024;
+  }
+  if (recipe.id === "audio-to-mov") {
+    const selectedSettings = settings ?? {};
+    const channels = selectedChannelCount(selectedSettings.audioChannels, inspection.audioChannels);
+    if (selectedSettings.outputFormat === "16-bit PCM in MOV") {
+      return duration * selectedSampleRate(selectedSettings.sampleRate, inspection.sampleRate) * channels * 2 + 512 * 1024;
+    }
+    return duration * projectedAudioBitrate(selectedSettings.compression, channels) / 8 + 512 * 1024;
   }
   if (!settings) return undefined;
   if (recipe.id === "video-to-mp4" || recipe.id === "video-to-webm") {
@@ -227,11 +320,13 @@ function projectedVideoBitrate(value: string | undefined) {
 }
 
 function projectedAudioBitrate(value: string | undefined, channels: number) {
-  const bitrate = value === "Maximum quality" ? 256_000
+  const explicitKbps = Number(value?.match(/(\d+)\s*kbps/i)?.[1]);
+  const bitrate = Number.isFinite(explicitKbps) && explicitKbps > 0 ? explicitKbps * 1000
+    : value === "Maximum quality" ? 256_000
     : value === "High quality" ? 192_000
       : value === "Small file" ? 96_000
         : 160_000;
-  return channels === 1 ? Math.min(128_000, bitrate) : bitrate;
+  return channels === 1 && !Number.isFinite(explicitKbps) ? Math.min(128_000, bitrate) : bitrate;
 }
 
 function projectedWavBytesPerSample(value: string | undefined) {
@@ -295,4 +390,13 @@ function canEncodeImage(type: string) {
   return new Promise<boolean>((resolve) => {
     canvas.toBlob((blob) => resolve(Boolean(blob)), type, 0.8);
   });
+}
+
+async function canEncodeOpusAudio() {
+  try {
+    const media = await import("mediabunny");
+    return media.canEncodeAudio("opus", { numberOfChannels: 2, sampleRate: 48_000, bitrate: 160_000 });
+  } catch {
+    return false;
+  }
 }

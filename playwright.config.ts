@@ -8,11 +8,6 @@ export default defineConfig({
     {
       name: "functional",
       testIgnore: /performance\.spec\.ts/
-    },
-    {
-      name: "performance",
-      testMatch: /performance\.spec\.ts/,
-      dependencies: ["functional"]
     }
   ],
   use: {

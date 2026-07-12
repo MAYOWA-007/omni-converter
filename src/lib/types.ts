@@ -33,7 +33,8 @@ export type Capability =
   | "video"
   | "image"
   | "webpEncoder"
-  | "avifEncoder";
+  | "avifEncoder"
+  | "opusEncoder";
 
 export type Intensity = "light" | "standard" | "heavy" | "extreme";
 

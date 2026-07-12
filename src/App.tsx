@@ -71,12 +71,13 @@ function controlLabel(control: string) { return ({ archiveSelection: "Files", ou
 function useOmniPerformance(stage: string) {
   useEffect(() => {
     document.querySelector(".prepaint-promise")?.remove();
-    const metrics = { longTasks: [] as number[], totalBlockingTime: 0, screens: [stage] };
+    const metrics = { longTasks: [] as number[], longTaskEntries: [] as Array<{ startTime: number; duration: number; name: string }>, totalBlockingTime: 0, screens: [stage] };
     window.__omniPerformance = metrics;
     if (!("PerformanceObserver" in window)) return;
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
         metrics.longTasks.push(entry.duration);
+        metrics.longTaskEntries.push({ startTime: entry.startTime, duration: entry.duration, name: entry.name });
         metrics.totalBlockingTime += Math.max(0, entry.duration - 50);
       }
     });
@@ -92,6 +93,6 @@ function useOmniPerformance(stage: string) {
 
 declare global {
   interface Window {
-    __omniPerformance?: { longTasks: number[]; totalBlockingTime: number; screens: string[] };
+    __omniPerformance?: { longTasks: number[]; longTaskEntries: Array<{ startTime: number; duration: number; name: string }>; totalBlockingTime: number; screens: string[] };
   }
 }

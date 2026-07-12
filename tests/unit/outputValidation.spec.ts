@@ -206,6 +206,104 @@ function minimalOgg() {
   return bytes;
 }
 
+function minimalAac() {
+  return new Uint8Array([0xff, 0xf1, 0x50, 0x40, 0x01, 0x3f, 0xfc, 0, 0]);
+}
+
+function minimalFlac() {
+  const bytes = new Uint8Array(42);
+  writeAscii(bytes, 0, "fLaC");
+  bytes[4] = 0x80;
+  bytes[7] = 34;
+  setUint16BE(bytes, 8, 16);
+  setUint16BE(bytes, 10, 16);
+  bytes[18] = 0x0a;
+  bytes[19] = 0xc4;
+  bytes[20] = 0x42;
+  return bytes;
+}
+
+function minimalMka() {
+  return new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x8b, 0x42, 0x82, 0x88, ...encoder.encode("matroska")]);
+}
+
+function minimalAiff() {
+  const bytes = new Uint8Array(54);
+  writeAscii(bytes, 0, "FORM");
+  setUint32BE(bytes, 4, 46);
+  writeAscii(bytes, 8, "AIFF");
+  writeAscii(bytes, 12, "COMM");
+  setUint32BE(bytes, 16, 18);
+  setUint16BE(bytes, 20, 1);
+  writeAscii(bytes, 38, "SSND");
+  setUint32BE(bytes, 42, 8);
+  return bytes;
+}
+
+function minimalCaf() {
+  const bytes = new Uint8Array(68);
+  writeAscii(bytes, 0, "caff");
+  setUint16BE(bytes, 4, 1);
+  writeAscii(bytes, 8, "desc");
+  writeAscii(bytes, 52, "data");
+  return bytes;
+}
+
+function minimalAc3(enhanced = false) {
+  return new Uint8Array([0x0b, 0x77, 0, 0, 0, enhanced ? 0x80 : 0x40, 0]);
+}
+
+function minimalAsf() {
+  const bytes = new Uint8Array(30);
+  bytes.set([0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62, 0xce, 0x6c]);
+  new DataView(bytes.buffer).setBigUint64(16, BigInt(bytes.length), true);
+  return bytes;
+}
+
+function minimalWavPack() {
+  const bytes = new Uint8Array(32);
+  writeAscii(bytes, 0, "wvpk");
+  setUint32LE(bytes, 4, 24);
+  setUint16LE(bytes, 8, 0x0410);
+  return bytes;
+}
+
+function minimalTta() {
+  const bytes = new Uint8Array(22);
+  writeAscii(bytes, 0, "TTA1");
+  setUint16LE(bytes, 6, 1);
+  setUint32LE(bytes, 10, 8000);
+  setUint32LE(bytes, 14, 1);
+  return bytes;
+}
+
+function minimalAu() {
+  const bytes = new Uint8Array(24);
+  writeAscii(bytes, 0, ".snd");
+  setUint32BE(bytes, 4, 24);
+  setUint32BE(bytes, 12, 3);
+  setUint32BE(bytes, 16, 8000);
+  setUint32BE(bytes, 20, 1);
+  return bytes;
+}
+
+function minimalWave64() {
+  const bytes = new Uint8Array(80);
+  writeAscii(bytes, 0, "riff");
+  bytes.set([0x2e, 0x91, 0xcf, 0x11], 4);
+  new DataView(bytes.buffer).setBigUint64(16, BigInt(bytes.length), true);
+  writeAscii(bytes, 24, "wave");
+  writeAscii(bytes, 40, "fmt ");
+  writeAscii(bytes, 64, "data");
+  return bytes;
+}
+
+function minimalMp2() {
+  const bytes = new Uint8Array(576);
+  bytes.set([0xff, 0xfd, 0xa4, 0]);
+  return bytes;
+}
+
 function minimalGzip() {
   return new Uint8Array([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0]);
 }
@@ -553,6 +651,23 @@ test("validates minimally structured emitted media, text, font, and archive form
     output("audio.wav", minimalWav()),
     output("audio.mp3", minimalMp3()),
     output("audio.ogg", minimalOgg()),
+    output("audio.opus", minimalOgg()),
+    output("audio.aac", minimalAac()),
+    output("audio.flac", minimalFlac()),
+    output("audio.mka", minimalMka()),
+    output("ringtone.m4r", isoBaseMedia("M4A ", ["moov", "mdat"])),
+    output("audio.aiff", minimalAiff()),
+    output("audio.caf", minimalCaf()),
+    output("audio.ac3", minimalAc3()),
+    output("audio.eac3", minimalAc3(true)),
+    output("audio.wma", minimalAsf()),
+    output("audio.wv", minimalWavPack()),
+    output("audio.tta", minimalTta()),
+    output("audio.mp2", minimalMp2()),
+    output("audio.au", minimalAu()),
+    output("audio.w64", minimalWave64()),
+    output("audio.pcm", [0, 0]),
+    output("audio.3gp", isoBaseMedia("3gp4", ["moov", "mdat"], ["3gp4", "isom"])),
     output("archive.gz", minimalGzip()),
     output("archive.tar", minimalTar()),
     output("archive.rar", minimalRar4()),
