@@ -356,8 +356,16 @@ async function createAudioVideo(file: File, baseName: string, settings: Conversi
     const range = resolveMediaTrimRange(settings, sourceDuration);
     const duration = range.end - range.start;
     const targetAudioRate = 48_000;
+    const targetAudioChannels = Math.min(2, sourceChannels);
+    const targetAudioCodec = mp4 ? "aac" : "opus";
+    const targetAudioBitrate = audioBitrate(settings.compression, targetAudioChannels);
+    await ensureAudioEncoder(media, targetAudioCodec, {
+      numberOfChannels: targetAudioChannels,
+      sampleRate: targetAudioRate,
+      bitrate: targetAudioBitrate
+    }, { preferBundled: mp4 });
     const videoCodec = await media.getFirstEncodableVideoCodec(mp4 ? ["avc"] : ["vp9", "vp8"], { width: size.width, height: size.height });
-    const audioCodec = await media.getFirstEncodableAudioCodec(mp4 ? ["aac"] : ["opus"], { numberOfChannels: Math.min(2, sourceChannels), sampleRate: targetAudioRate });
+    const audioCodec = await media.getFirstEncodableAudioCodec([targetAudioCodec], { numberOfChannels: targetAudioChannels, sampleRate: targetAudioRate });
     if (!videoCodec || !audioCodec) throw new Error(`${mp4 ? "MP4" : "WebM"} encoding is not supported by this browser and device.`);
 
     const canvas = document.createElement("canvas");
@@ -373,8 +381,8 @@ async function createAudioVideo(file: File, baseName: string, settings: Conversi
     });
     const audioSource = new media.AudioBufferSource({
       codec: audioCodec,
-      bitrate: audioBitrate(settings.compression, Math.min(2, sourceChannels)),
-      transform: { numberOfChannels: Math.min(2, sourceChannels), sampleRate: targetAudioRate }
+      bitrate: targetAudioBitrate,
+      transform: { numberOfChannels: targetAudioChannels, sampleRate: targetAudioRate }
     });
     output.addVideoTrack(videoSource);
     output.addAudioTrack(audioSource);
@@ -589,7 +597,15 @@ async function transcodeVideo(
     const geometry = videoGeometry(settings, sourceWidth, sourceHeight);
     const videoCodec = await media.getFirstEncodableVideoCodec(targetFormat === "mp4" ? ["avc"] : ["vp9", "vp8"], geometry.width && geometry.height ? { width: geometry.width, height: geometry.height } : undefined);
     if (!videoCodec) throw new Error(`${targetFormat.toUpperCase()} video encoding is not supported by this browser and device.`);
-    const audioCodec = audioTrack && audioChannels ? await media.getFirstEncodableAudioCodec(targetFormat === "mp4" ? ["aac"] : ["opus"], { sampleRate: 48_000, numberOfChannels: audioChannels }) : null;
+    const targetAudioCodec = targetFormat === "mp4" ? "aac" : "opus";
+    if (audioTrack && audioChannels) {
+      await ensureAudioEncoder(media, targetAudioCodec, {
+        numberOfChannels: audioChannels,
+        sampleRate: 48_000,
+        bitrate: audioBitrate(settings.compression, audioChannels)
+      }, { preferBundled: targetFormat === "mp4" });
+    }
+    const audioCodec = audioTrack && audioChannels ? await media.getFirstEncodableAudioCodec([targetAudioCodec], { sampleRate: 48_000, numberOfChannels: audioChannels }) : null;
     if (audioTrack && !audioCodec) throw new Error(`${targetFormat.toUpperCase()} audio encoding is not supported by this browser and device.`);
     const format = targetFormat === "mp4" ? new media.Mp4OutputFormat({ fastStart: "in-memory" }) : new media.WebMOutputFormat();
     const output = new media.Output({ format, target });
@@ -650,8 +666,12 @@ async function extractVideoAudio(file: File, baseName: string, settings: Convers
     const spec = audioOutputSpec(media, outputFormat, settings.compression);
     const channels = channelCount(settings.audioChannels) ?? Math.min(2, await track.getNumberOfChannels());
     const sampleRate = sampleRateValue(settings.sampleRate) ?? (spec.codec === "opus" ? 48_000 : await track.getSampleRate());
-    if (!spec.codec.startsWith("pcm-") && !await media.canEncodeAudio(spec.codec, { numberOfChannels: channels, sampleRate, bitrate: audioBitrate(settings.compression, channels) })) {
-      throw new Error(`${outputFormat} audio encoding is not supported by this browser and device.`);
+    if (!spec.codec.startsWith("pcm-")) {
+      await ensureAudioEncoder(media, spec.codec, {
+        numberOfChannels: channels,
+        sampleRate,
+        bitrate: audioBitrate(settings.compression, channels)
+      }, { preferBundled: spec.codec === "aac" });
     }
     const output = new media.Output({ format: spec.format, target });
     const conversion = await media.Conversion.init({

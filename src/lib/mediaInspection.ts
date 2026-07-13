@@ -1,4 +1,5 @@
 import type { FileFamily, FileInspection } from "./types";
+import { hasBundledAudioEncoder } from "./audioEncoders";
 
 export async function inspectMediaContainer(file: File, fallbackFamily: "audio" | "video"): Promise<Partial<FileInspection>> {
   const media = await import("mediabunny");
@@ -15,7 +16,7 @@ export async function inspectMediaContainer(file: File, fallbackFamily: "audio" 
     const family: FileFamily = videoTrack ? "video" : "audio";
     const exactFormat = mediaFormatId(format.mimeType, family, file.name);
     const duration = await input.computeDuration();
-    const [width, height, videoCodec, sampleRate, audioChannels, audioCodec, mp4Video, mp4Audio, webmVideo, webmAudio] = await Promise.all([
+    const [width, height, videoCodec, sampleRate, audioChannels, audioCodec, mp4Video, webmVideo, webmAudio] = await Promise.all([
       videoTrack?.getDisplayWidth(),
       videoTrack?.getDisplayHeight(),
       videoTrack?.getCodec(),
@@ -23,7 +24,6 @@ export async function inspectMediaContainer(file: File, fallbackFamily: "audio" 
       audioTrack?.getNumberOfChannels(),
       audioTrack?.getCodec(),
       media.getFirstEncodableVideoCodec(["avc"], { width: 640, height: 360 }),
-      media.getFirstEncodableAudioCodec(["aac"], { numberOfChannels: 1, sampleRate: 48_000 }),
       media.getFirstEncodableVideoCodec(["vp9", "vp8"], { width: 640, height: 360 }),
       media.getFirstEncodableAudioCodec(["opus"], { numberOfChannels: 1, sampleRate: 48_000 })
     ]);
@@ -45,7 +45,7 @@ export async function inspectMediaContainer(file: File, fallbackFamily: "audio" 
       sampleRate,
       audioChannels,
       audioCodec: audioCodec ?? undefined,
-      mediaTargets: { mp4: Boolean(mp4Video && mp4Audio), webm: Boolean(webmVideo && webmAudio) },
+      mediaTargets: { mp4: Boolean(mp4Video && hasBundledAudioEncoder("aac")), webm: Boolean(webmVideo && webmAudio) },
       notes
     };
   } catch {

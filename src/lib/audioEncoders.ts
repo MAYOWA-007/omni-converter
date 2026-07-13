@@ -11,9 +11,10 @@ const registrations = new Map<string, Promise<void>>();
 export async function ensureAudioEncoder(
   media: typeof import("mediabunny"),
   codec: AudioCodec,
-  probe: EncoderProbe
+  probe: EncoderProbe,
+  options: { preferBundled?: boolean } = {}
 ) {
-  if (await media.canEncodeAudio(codec, probe)) return;
+  if ((!options.preferBundled || !hasBundledAudioEncoder(codec)) && await media.canEncodeAudio(codec, probe)) return;
 
   const registrationKey = codec === "eac3" ? "ac3" : codec;
   let registration = registrations.get(registrationKey);
@@ -26,6 +27,10 @@ export async function ensureAudioEncoder(
   if (!await media.canEncodeAudio(codec, probe)) {
     throw new Error(`${audioCodecLabel(codec)} encoding is not supported by this browser and device.`);
   }
+}
+
+export function hasBundledAudioEncoder(codec: AudioCodec) {
+  return codec === "mp3" || codec === "flac" || codec === "aac" || codec === "ac3" || codec === "eac3";
 }
 
 async function registerEncoder(codec: AudioCodec) {

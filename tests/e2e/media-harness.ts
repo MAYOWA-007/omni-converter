@@ -2,6 +2,7 @@ import { BlobReader, BlobWriter, ZipReader } from "@zip.js/zip.js";
 import { validateOutput } from "../../src/core/outputValidation";
 import { CONVERSION_RECIPES } from "../../src/data/conversionMatrix";
 import { VERIFIED_MEDIA_RECIPE_CONTRACTS } from "../../src/data/verifiedMediaRecipes";
+import { ensureAudioEncoder } from "../../src/lib/audioEncoders";
 import { convertRecipe } from "../../src/lib/conversions";
 import { inspectFile } from "../../src/lib/fileInspection";
 import type { ConversionSettings } from "../../src/lib/types";
@@ -41,9 +42,10 @@ async function inspectFormat(format: keyof typeof FORMAT_FIXTURES) {
 
 async function probeEncoders() {
   const media = await import("mediabunny");
+  await ensureAudioEncoder(media, "aac", { numberOfChannels: 1, sampleRate: 48_000, bitrate: 160_000 }, { preferBundled: true });
   return {
     mp4Video: await media.getFirstEncodableVideoCodec(["avc"], { width: 640, height: 360 }),
-    mp4Audio: await media.getFirstEncodableAudioCodec(["aac"], { numberOfChannels: 1, sampleRate: 44_100 }),
+    mp4Audio: await media.getFirstEncodableAudioCodec(["aac"], { numberOfChannels: 1, sampleRate: 48_000 }),
     webmVideo: await media.getFirstEncodableVideoCodec(["vp9", "vp8"], { width: 640, height: 360 }),
     webmAudio: await media.getFirstEncodableAudioCodec(["opus"], { numberOfChannels: 1, sampleRate: 48_000 })
   };
