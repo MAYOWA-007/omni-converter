@@ -34,8 +34,8 @@ test("starts with a nonblank lightweight vortex fallback and upgrades to a bound
   }), { timeout: 5_000 }).toBe(true);
 });
 
-test("keeps an accessible static globe when the Three import fails", async ({ browser }) => {
-  const context = await browser.newContext({ baseURL: "http://127.0.0.1:5190", serviceWorkers: "block" });
+test("keeps an accessible static globe when the Three import fails", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, serviceWorkers: "block" });
   const page = await context.newPage();
   let blockedImports = 0;
   await page.route(/WebGLRenderer/, async (route) => {
