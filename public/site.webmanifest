@@ -2,7 +2,7 @@
   "id": "/omni-converter/",
   "name": "Omni Converter",
   "short_name": "Omni",
-  "description": "Convert, compress, inspect, and package files in a focused browser workflow.",
+  "description": "Recognize 250+ formats and run 100+ on-device browser conversion workflows.",
   "start_url": "/omni-converter/",
   "scope": "/omni-converter/",
   "icons": [

@@ -1,11 +1,15 @@
 import type { FileInspection } from "./types";
 import { inspectFileHeader } from "../core/inspection";
 import { normalizeArchivePath } from "../core/archivePaths";
-import { findFormatByExtension, findFormatByMime } from "../core/formatUniverse";
+import { findFormatByExtension, findFormatByMime, FORMAT_UNIVERSE } from "../core/formatUniverse";
 import { inspectMediaContainer } from "./mediaInspection";
 
 const MAX_PDF_ANALYSIS_BYTES = 128 * 1024 * 1024;
 const MAX_XLSX_ANALYSIS_BYTES = 64 * 1024 * 1024;
+
+export const RECOGNIZED_FILE_EXTENSIONS = Object.freeze(
+  Array.from(new Set(FORMAT_UNIVERSE.flatMap((format) => format.extensions)))
+);
 
 export async function inspectFile(file: File): Promise<FileInspection> {
   const extension = file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() ?? "" : "";
@@ -109,7 +113,16 @@ async function inspectImage(file: File): Promise<Partial<FileInspection>> {
   try {
     const image = new Image();
     image.src = url;
-    await image.decode();
+    try {
+      await image.decode();
+    } catch {
+      return {
+        family: "unknown",
+        exactFormat: "unknown",
+        signatureSource: "unknown",
+        notes: ["This image variant is recognized by extension but cannot be decoded by this browser; universal file tools remain available."]
+      };
+    }
     return {
       width: image.naturalWidth,
       height: image.naturalHeight,

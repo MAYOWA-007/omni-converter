@@ -225,9 +225,10 @@ test("legacy adapter passes the exact execution context to converters and expose
 test("only engines with a cooperative or hard cancellation capability are advertised as cancellable", () => {
   const cooperative = fakeEngine("test-cooperative-engine", "test-cooperative-engine", async () => [], "cooperative");
 
-  expect(legacyEngines.map((engine) => engine.cancellation)).toEqual(["none", "none", "cooperative", "none"]);
+  expect(legacyEngines.filter(engineCanCancel).map((engine) => engine.id)).toEqual(["legacy-universal", "browser-media"]);
+  expect(engineCanCancel(legacyEngines.find((engine) => engine.id === "legacy-universal")!)).toBe(true);
   expect(engineCanCancel(legacyEngines.find((engine) => engine.id === "browser-media")!)).toBe(true);
-  expect(legacyEngines.filter((engine) => engine.id !== "browser-media").every((engine) => !engineCanCancel(engine))).toBe(true);
+  expect(legacyEngines.filter((engine) => !["legacy-universal", "browser-media"].includes(engine.id)).every((engine) => !engineCanCancel(engine))).toBe(true);
   expect(engineCanCancel(cooperative)).toBe(true);
 });
 

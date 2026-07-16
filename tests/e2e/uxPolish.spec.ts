@@ -8,7 +8,8 @@ const PNG_BYTES = Buffer.from(
 async function openImageCatalog(page: Page) {
   await page.goto("/");
   const input = page.locator('input[type="file"]');
-  await expect(input).toHaveAttribute("tabindex", "-1");
+  await expect(input).toHaveAccessibleName("Drop any file");
+  await expect(input).not.toHaveAttribute("tabindex", "-1");
   await input.setInputFiles({ name: "product-ui-proof.png", mimeType: "image/png", buffer: PNG_BYTES });
   await expect(page.getByRole("heading", { name: "What should it become?" })).toBeFocused();
 }
@@ -54,6 +55,7 @@ test("catalog remains one-column, readable, and contained at 320px", async ({ pa
       pageWidth: document.documentElement.scrollWidth,
       viewportWidth: innerWidth,
       oneColumn: Boolean(first && second && second.top > first.bottom),
+      contentFits: cards.every((card) => card.scrollHeight <= card.clientHeight + 1),
       cardFits: cards.every((card) => {
         const rect = card.getBoundingClientRect();
         return rect.left >= 0 && rect.right <= innerWidth;
@@ -63,5 +65,6 @@ test("catalog remains one-column, readable, and contained at 320px", async ({ pa
 
   expect(result.pageWidth).toBeLessThanOrEqual(result.viewportWidth);
   expect(result.oneColumn).toBe(true);
+  expect(result.contentFits).toBe(true);
   expect(result.cardFits).toBe(true);
 });

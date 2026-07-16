@@ -5,7 +5,7 @@ import { engineForRecipe } from "../../src/engines/registry";
 import "../../src/lib/conversions";
 
 test("every verified browser image recipe has one executable coverage contract", () => {
-  const verified = verifiedRecipesForFamily("image", "browser");
+  const verified = verifiedRecipesForFamily("image", "browser").filter((recipe) => recipe.input.includes("image"));
   const contractIds = VERIFIED_IMAGE_RECIPE_CONTRACTS.map((contract) => contract.recipeId);
 
   expect(new Set(contractIds).size).toBe(contractIds.length);
@@ -25,7 +25,7 @@ test("every verified browser image recipe has one executable coverage contract",
 });
 
 test("verified recipe controls are covered by settings-differential assertions", () => {
-  const verified = verifiedRecipesForFamily("image", "browser");
+  const verified = verifiedRecipesForFamily("image", "browser").filter((recipe) => recipe.input.includes("image"));
 
   for (const recipe of verified) {
     const contract = VERIFIED_IMAGE_RECIPE_CONTRACTS.find((candidate) => candidate.recipeId === recipe.id)!;

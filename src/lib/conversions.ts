@@ -1,7 +1,7 @@
 import { legacyEngines } from "../engines/legacyAdapter";
 import { engineForRecipe, registerEngine } from "../engines/registry";
 import type { EngineProgressReporter } from "../engines/types";
-import { deriveRecipeAvailability } from "../core/catalog";
+import { deriveRecipeAvailability } from "../core/recipeAvailability";
 import { saveOutput, saveOutputBundle } from "../core/export";
 import type { ConversionOutput } from "./imageConversions";
 import type { ConversionRecipe, ConversionSettings, FileInspection, RecipeRuntime } from "./types";

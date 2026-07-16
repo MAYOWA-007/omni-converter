@@ -52,7 +52,12 @@ function ChooseScreen({ catalog, inspection, recipes, preflights, onSelect, onBa
   const [output, setOutput] = useState("all");
   const categories = useMemo(() => catalog.recipeCategories(recipes), [catalog, recipes]);
   const outputs = useMemo(() => catalog.recipeOutputs(recipes), [catalog, recipes]);
-  const visibleRecipes = useMemo(() => catalog.filterRecipesByQuery(recipes, query).filter((recipe) => (category === "all" || recipe.category === category) && (output === "all" || recipe.output === output)), [catalog, category, output, query, recipes]);
+  const visibleRecipes = useMemo(
+    () => [...catalog.filterRecipesByQuery(recipes, query)
+      .filter((recipe) => (category === "all" || recipe.category === category) && (output === "all" || recipe.output === output))]
+      .sort((a, b) => Number(a.input.includes("unknown")) - Number(b.input.includes("unknown"))),
+    [catalog, category, output, query, recipes]
+  );
   const countLabel = query.trim() ? `${visibleRecipes.length} of ${recipes.length} conversions` : `${recipes.length} available conversions`;
 
   useEffect(() => {
@@ -70,7 +75,7 @@ function ChooseScreen({ catalog, inspection, recipes, preflights, onSelect, onBa
       <div className="conversion-command-band">
         <label className="conversion-search">
           <Search size={15} />
-          <input aria-label="Search conversions" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by format or result" />
+          <input aria-label="Search conversions" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search output or task: PDF, checksum, Base64, ZIP..." />
         </label>
         <div className="conversion-filters" aria-label="Conversion filters">
           <label>
@@ -91,7 +96,7 @@ function ChooseScreen({ catalog, inspection, recipes, preflights, onSelect, onBa
       </div>
       <div className="recipe-stage-grid">
         {visibleRecipes.map((recipe) => <RecipeCard key={recipe.id} recipe={recipe} preflight={preflights.get(recipe.id) ?? null} selected={false} onSelect={() => onSelect(recipe)} />)}
-        {!visibleRecipes.length ? <p className="empty-results">No matching conversion. Try a format name like PNG, PDF, JPG, WebP, icon, embed, or ZIP.</p> : null}
+        {!visibleRecipes.length ? <p className="empty-results">No matching conversion. Try PDF, checksum, Base64, metadata, text, JSON, gzip, or ZIP.</p> : null}
       </div>
     </section>
   );

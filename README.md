@@ -1,6 +1,6 @@
 # Omni Converter
 
-Omni Converter is a browser-based file conversion and editing application. Files are inspected, transformed, previewed, and packaged on the user's device without an upload or cloud conversion service.
+Omni Converter is a browser-based file conversion and editing application. It recognizes more than 250 normalized file extensions and exposes more than 100 conversion cards. Files are inspected, transformed, previewed, and packaged on the user's device without an upload or cloud conversion service.
 
 ## Verified Conversions
 
@@ -10,8 +10,10 @@ Omni Converter is a browser-based file conversion and editing application. Files
 - Documents: verified DOCX and PPTX semantic extraction plus media bundles.
 - Archives and ebooks: bounded ZIP operations and verified EPUB conversions.
 - Media: MP4/WebM transcoding, frame and contact-sheet exports, audio extraction, audio transcoding, waveforms, and audio-to-video.
+- Universal file tools: ZIP, GZIP, SHA-256/SHA-384/SHA-512 manifests, metadata reports, byte and entropy analysis, Base64, Data URI, hex dumps, and chunked ZIP packages.
+- Text and structured data: HTML, Markdown, JSON, PDF, line numbering, word-frequency and case packs, JSON formatting/minification, JSON Lines, CSV/TSV, and XML/JSON transforms.
 
-Every selectable route is backed by a registered browser engine and executable fixture coverage. Unsupported or misleading routes stay unavailable.
+The format universe distinguishes recognition from conversion support. Every selectable route is backed by a registered browser engine and executable fixture coverage; unsupported or misleading specialist routes stay unavailable while safe universal tools remain usable.
 
 ## Development
 

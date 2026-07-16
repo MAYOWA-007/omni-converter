@@ -2,6 +2,7 @@ import { canConvertAdvancedRecipe, convertAdvancedRecipe } from "../lib/advanced
 import { canConvertImageRecipe, convertImageRecipe } from "../lib/imageConversions";
 import { canConvertPdfRecipe, convertPdfRecipe } from "../lib/pdfConversions";
 import { canConvertMediaRecipe, convertMediaRecipe } from "../lib/mediaConversions";
+import { canConvertUniversalRecipe, convertUniversalRecipe } from "../lib/universalConversions";
 import type { ConversionRecipe, ConversionSettings, FileInspection, RecipeRuntime } from "../lib/types";
 import type { ConversionEngine, EngineCancellationCapability, EngineResult, LegacyExecutionContext } from "./types";
 
@@ -31,6 +32,13 @@ export function createLegacyAdapter(options: LegacyAdapterOptions): ConversionEn
 }
 
 export const legacyEngines: readonly ConversionEngine[] = [
+  createLegacyAdapter({
+    id: "legacy-universal",
+    runtimes: ["browser"],
+    cancellation: "cooperative",
+    ownsRecipe: canConvertUniversalRecipe,
+    convert: convertUniversalRecipe
+  }),
   createLegacyAdapter({
     id: "legacy-image",
     runtimes: ["browser"],

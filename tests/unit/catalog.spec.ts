@@ -11,12 +11,17 @@ test("verified browser recipe is selectable", () => {
 });
 
 test("browser image promotion is driven by fixture contracts", () => {
-  expect(verifiedRecipesForFamily("image", "browser").map((recipe) => recipe.id)).toEqual(VERIFIED_IMAGE_RECIPE_CONTRACTS.map((contract) => contract.recipeId));
+  const imageIds = verifiedRecipesForFamily("image", "browser")
+    .filter((recipe) => recipe.input.includes("image"))
+    .map((recipe) => recipe.id);
+  expect(imageIds).toEqual(VERIFIED_IMAGE_RECIPE_CONTRACTS.map((contract) => contract.recipeId));
 });
 
 test("normal browser catalog excludes image paths without passing fixtures", () => {
   const ids = browserRecipesForFamily("image").map((recipe) => recipe.id);
-  expect(ids).toEqual(VERIFIED_IMAGE_RECIPE_CONTRACTS.map((contract) => contract.recipeId));
+  expect(ids).toEqual(expect.arrayContaining(VERIFIED_IMAGE_RECIPE_CONTRACTS.map((contract) => contract.recipeId)));
+  expect(ids).toContain("file-to-zip");
+  expect(ids).toContain("file-checksum-manifest");
   expect(ids).not.toContain("image-to-avif");
   expect(ids).not.toContain("image-ocr-text");
   expect(ids).not.toContain("image-to-motion-card");

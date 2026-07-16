@@ -90,7 +90,7 @@ export function DropVortex({ active, fileLoaded, onFile, onDragActive }: DropVor
           <div className="vortex-canvas vortex-fallback" aria-hidden="true" />
         )}
       </div>
-      <div
+      <label
         className="drop-core"
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -105,7 +105,7 @@ export function DropVortex({ active, fileLoaded, onFile, onDragActive }: DropVor
           <Upload size={18} strokeWidth={1.6} />
           Drop any file
         </span>
-      </div>
+      </label>
     </section>
   );
 }

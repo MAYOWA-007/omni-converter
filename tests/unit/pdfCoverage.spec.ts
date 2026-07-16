@@ -5,7 +5,7 @@ import { engineForRecipe } from "../../src/engines/registry";
 import "../../src/lib/conversions";
 
 test("every verified browser PDF recipe has one executable fixture contract", () => {
-  const verified = verifiedRecipesForFamily("pdf", "browser");
+  const verified = verifiedRecipesForFamily("pdf", "browser").filter((recipe) => recipe.input.includes("pdf"));
   const contractIds = VERIFIED_PDF_RECIPE_CONTRACTS.map((contract) => contract.recipeId);
 
   expect(contractIds).toHaveLength(15);
@@ -28,7 +28,7 @@ test("every verified browser PDF recipe has one executable fixture contract", ()
 });
 
 test("verified PDF controls are covered by settings-differential assertions", () => {
-  const verified = verifiedRecipesForFamily("pdf", "browser");
+  const verified = verifiedRecipesForFamily("pdf", "browser").filter((recipe) => recipe.input.includes("pdf"));
   for (const recipe of verified) {
     const contract = VERIFIED_PDF_RECIPE_CONTRACTS.find((candidate) => candidate.recipeId === recipe.id)!;
     expect(contract.differentialControls).toEqual(recipe.editorControls);

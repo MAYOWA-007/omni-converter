@@ -1,11 +1,11 @@
 import { expect, test } from "playwright/test";
 import { createSineWavBytes } from "../fixtures/mediaFixtures";
 
-test("valid audio exposes only verified audio conversions and corrupt media exposes none", async ({ page }) => {
+test("valid audio exposes verified audio conversions and corrupt media falls back to universal tools", async ({ page }) => {
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles({ name: "Tone.wav", mimeType: "audio/wav", buffer: Buffer.from(createSineWavBytes()) });
-  await expect(page.getByText("28 available conversions")).toBeVisible();
-  await expect(page.locator(".recipe-card")).toHaveCount(28);
+  await expect(page.getByText("37 available conversions")).toBeVisible();
+  await expect(page.locator(".recipe-card")).toHaveCount(37);
   if (process.env.OMNI_CAPTURE_WAV_CATALOG === "1") await page.screenshot({ path: "../.superpowers/sdd/wav-catalog-desktop.png" });
   const wavCard = page.locator(".recipe-card").filter({ has: page.getByText("Audio to WAV", { exact: true }) });
   const waveformCard = page.locator(".recipe-card").filter({ has: page.getByText("Audio to waveform assets", { exact: true }) });
@@ -31,14 +31,16 @@ test("valid audio exposes only verified audio conversions and corrupt media expo
 
   await page.getByRole("button", { name: "Start over" }).click();
   await page.locator('input[type="file"]').setInputFiles({ name: "broken.mp3", mimeType: "audio/mpeg", buffer: Buffer.from("not an audio file") });
-  await expect(page.getByText("0 available conversions")).toBeVisible();
+  await expect(page.getByText("9 available conversions")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Audio to MP3" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create checksum manifest" })).toBeVisible();
 });
 
 test("the expanded WAV catalog remains searchable and contained on a phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles({ name: "Tone.wav", mimeType: "audio/wav", buffer: Buffer.from(createSineWavBytes()) });
-  await expect(page.getByText("28 available conversions")).toBeVisible();
+  await expect(page.getByText("37 available conversions")).toBeVisible();
   if (process.env.OMNI_CAPTURE_WAV_CATALOG === "1") await page.screenshot({ path: "../.superpowers/sdd/wav-catalog-mobile.png" });
 
   const search = page.getByRole("textbox", { name: "Search conversions" });

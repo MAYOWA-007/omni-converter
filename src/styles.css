@@ -2275,10 +2275,12 @@ a {
 
   .recipe-stage-grid {
     grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: auto;
   }
 
   .recipe-card {
-    min-height: 0;
+    height: max-content;
+    min-height: 10.25rem;
   }
 
   .timeline-play {

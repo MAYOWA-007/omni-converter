@@ -74,12 +74,14 @@ test("keeps an accessible static globe when WebGL initialization fails", async (
 test("falls back to the static globe when the WebGL context is lost", async ({ page }) => {
   await page.goto("/");
   const canvas = page.locator("canvas[data-vortex-scene]");
-  await expect.poll(() => page.evaluate(() => window.__omniVortex?.state ?? "loading"), { timeout: 5_000 }).toMatch(/ready|fallback/);
+  // The static globe is already visible while the deliberately delayed Three
+  // chunk loads. Allow extra headroom when this spec follows encoder-heavy runs.
+  await expect.poll(() => page.evaluate(() => window.__omniVortex?.state ?? "loading"), { timeout: 10_000 }).toMatch(/ready|fallback/);
   if (await page.evaluate(() => window.__omniVortex?.state) === "fallback") {
     await expect(page.getByRole("img", { name: "Static wire globe" })).toBeVisible();
     test.skip(true, "WebGL was unavailable before a context-loss event could be injected.");
   }
-  await expect(canvas).toBeVisible({ timeout: 5_000 });
+  await expect(canvas).toBeVisible({ timeout: 10_000 });
   const prevented = await canvas.evaluate((node) => {
     const event = new Event("webglcontextlost", { cancelable: true });
     node.dispatchEvent(event);
@@ -102,8 +104,10 @@ test("uses the globe itself as a stable circular drop target", async ({ page }) 
   const bounds = await target.boundingBox();
   expect(bounds?.width).toBeCloseTo(bounds?.height ?? 0, 1);
   expect(bounds?.width).toBeCloseTo(0.52 * 390, 0);
-  await target.focus();
-  await expect(target).toBeFocused();
+  const input = target.locator('input[type="file"]');
+  await input.focus();
+  await expect(input).toBeFocused();
+  await expect.poll(() => target.evaluate((node) => node.matches(":focus-within"))).toBe(true);
 });
 
 test("records long tasks and keeps the main page bounded", async ({ page }) => {

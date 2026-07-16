@@ -44,13 +44,16 @@ test("converts a real PNG into a validated PDF and saves only after an explicit 
   expect(downloads).toBe(1);
 });
 
-test("a corrupt PNG reaches a failed result without a save action", async ({ page }) => {
+test("a malformed XML conversion reaches a failed result without a save action", async ({ page }) => {
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles({
-    name: "broken.png",
-    mimeType: "image/png",
-    buffer: PNG_BYTES.subarray(0, 16)
+    name: "broken.xml",
+    mimeType: "application/xml",
+    buffer: Buffer.from("<records><item></records>")
   });
+
+  await page.getByRole("button", { name: "XML to JSON" }).click();
+  await page.getByRole("button", { name: "Convert" }).click();
 
   const firstFailure = await page.getByRole("heading", { name: "Conversion failed" }).elementHandle();
   expect(firstFailure).not.toBeNull();
@@ -59,6 +62,8 @@ test("a corrupt PNG reaches a failed result without a save action", async ({ pag
   await expect(page.getByRole("heading", { name: "Conversion failed" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Save/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByRole("heading", { name: "XML to JSON" })).toBeVisible();
+  await page.getByRole("button", { name: "Start over" }).click();
   await expect(page.locator('input[type="file"]')).toBeVisible();
 });
 
