@@ -5,7 +5,7 @@ import { engineForRecipe } from "../../src/engines/registry";
 import { RECOGNIZED_FILE_EXTENSIONS } from "../../src/lib/fileInspection";
 import "../../src/lib/conversions";
 
-test("the catalog has more than 100 executable conversion cards and recognizes hundreds of extensions", () => {
+test("the catalog has more than 100 conversion cards and recognizes hundreds of extensions", () => {
   expect(CONVERSION_RECIPES.length).toBeGreaterThan(100);
   expect(RECOGNIZED_FILE_EXTENSIONS.length).toBeGreaterThan(250);
   expect(new Set(RECOGNIZED_FILE_EXTENSIONS).size).toBe(RECOGNIZED_FILE_EXTENSIONS.length);

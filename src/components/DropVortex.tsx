@@ -100,7 +100,18 @@ export function DropVortex({ active, fileLoaded, onFile, onDragActive }: DropVor
         onFocus={() => setHovered(true)}
         onBlur={() => setHovered(false)}
       >
-        <input className="drop-input" aria-label="Drop any file" type="file" onChange={(event) => handleFiles(event.target.files)} />
+        <input
+          className="drop-input"
+          aria-label="Drop any file"
+          type="file"
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.click();
+            }
+          }}
+          onChange={(event) => handleFiles(event.target.files)}
+        />
         <span className="drop-copy">
           <Upload size={18} strokeWidth={1.6} />
           Drop any file

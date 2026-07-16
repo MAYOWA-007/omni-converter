@@ -12,7 +12,7 @@ test("keyboard intake has one file-picker stop and restores focus at the catalog
   await expect(dropTarget).toBeFocused();
 
   const chooserPromise = page.waitForEvent("filechooser");
-  await page.keyboard.press("Enter");
+  await dropTarget.press("Enter");
   const chooser = await chooserPromise;
   await chooser.setFiles({ name: "keyboard-intake.png", mimeType: "image/png", buffer: PNG_BYTES });
 
