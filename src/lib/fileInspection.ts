@@ -119,4 +119,3 @@ async function inspectImage(file: File): Promise<Partial<FileInspection>> {
     URL.revokeObjectURL(url);
   }
 }
-
