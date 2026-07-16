@@ -1,7 +1,18 @@
-import { CONVERSION_RECIPES } from "../data/conversionMatrix";
+import * as conversionCatalog from "../data/conversionMatrix";
 import type { ConversionRecipe, FileFamily, FileInspection, RecipeAvailability, RecipeRuntime } from "../lib/types";
 
 type AvailabilityRecipe = Pick<ConversionRecipe, "maturity"> & Partial<Pick<ConversionRecipe, "runtimes">>;
+type ConversionMatrix = typeof import("../data/conversionMatrix");
+export type LoadedConversionCatalog = ConversionMatrix & {
+  browserRecipesForInspection: typeof browserRecipesForInspection;
+};
+
+let catalogPromise: Promise<LoadedConversionCatalog> | null = null;
+
+export function loadConversionCatalog() {
+  catalogPromise ??= Promise.resolve({ ...conversionCatalog, browserRecipesForInspection });
+  return catalogPromise;
+}
 
 export function deriveRecipeAvailability(recipe: AvailabilityRecipe, runtime: RecipeRuntime): RecipeAvailability {
   return {
@@ -12,7 +23,7 @@ export function deriveRecipeAvailability(recipe: AvailabilityRecipe, runtime: Re
 }
 
 export function verifiedRecipesForFamily(family: FileFamily, runtime: RecipeRuntime): ConversionRecipe[] {
-  return CONVERSION_RECIPES.filter(
+  return conversionCatalog.CONVERSION_RECIPES.filter(
     (recipe) =>
       (recipe.input.includes(family) || recipe.input.includes("unknown")) && deriveRecipeAvailability(recipe, runtime).selectable
   );

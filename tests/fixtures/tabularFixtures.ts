@@ -40,6 +40,39 @@ export function createMultiSheetXlsxBytes() {
 
 export const QUOTED_CSV = 'name,count,active,note,formula\r\n"Zoë",7,true,"comma, and\nline",=2+2\r\nAlpha,007,false,plain,@command';
 
+export type StructuredInputFixtureId = "json" | "jsonl" | "ndjson" | "tsv";
+
+const STRUCTURED_INPUT_FIXTURES: Readonly<Record<StructuredInputFixtureId, { name: string; type: string; text: string }>> = {
+  json: {
+    name: "records-json.json",
+    type: "application/json",
+    text: JSON.stringify([
+      { name: "Alpha", count: 2, active: true },
+      { name: "Beta", count: 7, active: false }
+    ])
+  },
+  jsonl: {
+    name: "records-jsonl.jsonl",
+    type: "application/x-ndjson",
+    text: '{"name":"Alpha","count":2}\n{"name":"Beta","active":true}\n'
+  },
+  ndjson: {
+    name: "records-ndjson.ndjson",
+    type: "application/x-ndjson",
+    text: '{"sku":"A-1","price":12.5,"available":true}\r\n\r\n{"sku":"B-2","price":8,"available":false}\r\n'
+  },
+  tsv: {
+    name: "records-tsv.tsv",
+    type: "text/tab-separated-values",
+    text: 'name\tnote\tformula\r\nAlpha\t"tab\tinside"\t=2+2\r\nBeta\t"line one\nline two"\tplain'
+  }
+};
+
+export function structuredInputFixture(fixtureId: StructuredInputFixtureId) {
+  const fixture = STRUCTURED_INPUT_FIXTURES[fixtureId];
+  return new File([fixture.text], fixture.name, { type: fixture.type, lastModified: 1_700_000_000_000 });
+}
+
 function worksheet(rows: string[][]) {
   return xml(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows.map((cells, index) => `<row r="${index + 1}">${cells.join("")}</row>`).join("")}</sheetData></worksheet>`);
 }

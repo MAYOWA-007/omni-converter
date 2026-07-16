@@ -1,7 +1,7 @@
 import { FileQuestion } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { EngineResult } from "../engines/types";
-import { formatBytes } from "../lib/fileInspection";
+import { formatBytes } from "../lib/formatting";
 
 const TEXT_PREVIEW_LIMIT = 64 * 1024;
 

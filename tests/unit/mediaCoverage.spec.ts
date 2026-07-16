@@ -34,6 +34,34 @@ const WAV_RECIPE_IDS = [
   "audio-to-video"
 ] as const;
 
+const ROUND_TRIP_AUDIO_FORMATS = [
+  "wav",
+  "mp3",
+  "flac",
+  "m4a",
+  "aac",
+  "ogg",
+  "opus",
+  "webm",
+  "mka",
+  "mov",
+  "m4r",
+  "aiff",
+  "caf",
+  "ac3",
+  "eac3",
+  "oga",
+  "wma",
+  "wv",
+  "tta",
+  "mp2",
+  "au",
+  "w64",
+  "3gp"
+] as const;
+
+const ROUND_TRIP_VIDEO_FORMATS = ["mp4", "webm", "mov", "m4v", "mkv", "ts"] as const;
+
 test("every verified media recipe has one executable browser fixture contract", () => {
   for (const contract of VERIFIED_MEDIA_RECIPE_CONTRACTS) {
     const recipe = CONVERSION_RECIPES.find((entry) => entry.id === contract.recipeId);
@@ -65,4 +93,37 @@ test("a WAV upload exposes every locally executable audio container and derivati
 
   expect(recipes.map((recipe) => recipe.id)).toEqual(expect.arrayContaining(WAV_RECIPE_IDS));
   expect(new Set(recipes.map((recipe) => recipe.id)).size).toBe(recipes.length);
+});
+
+test("every self-contained audio output can re-enter every verified audio path", () => {
+  const audioRecipes = CONVERSION_RECIPES.filter((recipe) => recipe.maturity === "verified" && recipe.input.includes("audio"));
+
+  expect(audioRecipes).toHaveLength(WAV_RECIPE_IDS.length);
+  for (const recipe of audioRecipes) {
+    expect(recipe.inputFormats, recipe.id).toEqual(expect.arrayContaining(ROUND_TRIP_AUDIO_FORMATS));
+  }
+
+  for (const format of ROUND_TRIP_AUDIO_FORMATS) {
+    const recipes = browserRecipesForInspection({
+      name: `Round trip.${format}`,
+      extension: format,
+      mime: "application/octet-stream",
+      size: 128,
+      family: "audio",
+      exactFormat: format,
+      signatureSource: "signature",
+      notes: []
+    });
+    expect(recipes.map((recipe) => recipe.id), format).toEqual(expect.arrayContaining(WAV_RECIPE_IDS));
+  }
+});
+
+test("every fixture-verified single-file video container enters every verified video path", () => {
+  const videoRecipes = CONVERSION_RECIPES.filter((recipe) => recipe.maturity === "verified" && recipe.input.includes("video"));
+
+  expect(videoRecipes).toHaveLength(5);
+  for (const recipe of videoRecipes) {
+    expect(recipe.inputFormats, recipe.id).toEqual(expect.arrayContaining(ROUND_TRIP_VIDEO_FORMATS));
+    expect(recipe.inputFormats, recipe.id).not.toContain("m3u8");
+  }
 });

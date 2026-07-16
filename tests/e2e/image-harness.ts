@@ -4,6 +4,7 @@ import { convertImageRecipe } from "../../src/lib/imageConversions";
 import type { ConversionSettings, FileInspection } from "../../src/lib/types";
 import { PDFDocument, PDFName, PDFNumber, PDFRawStream } from "pdf-lib";
 import "../../src/lib/conversions";
+import { imageInputFixture, type ImageInputFixtureId } from "../fixtures/imageInputFixtures";
 
 interface SerializedOutput {
   name: string;
@@ -67,6 +68,48 @@ async function runImageRecipe(recipeId: string, settings: ConversionSettings, so
   })));
 }
 
+async function runImageInputFixture(fixtureId: ImageInputFixtureId) {
+  const file = imageInputFixture(fixtureId);
+  const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+  const source = await inspectImage({ bytes, type: file.type });
+  const recipe = CONVERSION_RECIPES.find((candidate) => candidate.id === "image-to-png");
+  if (!recipe) throw new Error("The image-to-png recipe is unavailable.");
+  const inspection: FileInspection = {
+    name: file.name,
+    extension: file.name.split(".").pop()?.toLowerCase(),
+    mime: file.type,
+    size: file.size,
+    family: "image",
+    width: source.width,
+    height: source.height,
+    exactFormat: fixtureId,
+    signatureSource: "signature",
+    notes: []
+  };
+  const controller = createJobController(undefined, { createId: () => `fixture-input-${fixtureId}` });
+  const job = controller.create({
+    file,
+    inspection,
+    recipe,
+    settings: { resolution: "Original", crop: "Fit entire source", color: "Preserve transparency", batchNaming: "Keep source name" }
+  });
+  const completed = await controller.start(job.id);
+  if (completed.state !== "complete") throw new Error(`${completed.error?.name ?? "ConversionError"}: ${completed.error?.message ?? completed.state}`);
+  const [output] = controller.getResult(job.id) ?? [];
+  if (!output) throw new Error(`${fixtureId} fixture conversion produced no output.`);
+  const outputBytes = Array.from(new Uint8Array(await output.blob.arrayBuffer()));
+  const serialized: SerializedOutput = {
+    name: output.name,
+    type: output.blob.type,
+    bytes: outputBytes,
+    validation: completed.outputs[0]?.validation && {
+      valid: completed.outputs[0].validation.valid,
+      detectedFormat: completed.outputs[0].validation.detectedFormat
+    }
+  };
+  return { source, output: serialized, decoded: await inspectImage(serialized) };
+}
+
 async function inspectPdf(bytes: number[]) {
   const data = Uint8Array.from(bytes);
   const pdfLib = await PDFDocument.load(data);
@@ -121,9 +164,11 @@ async function inspectImage(output: Pick<SerializedOutput, "bytes" | "type">) {
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Image inspection canvas is unavailable.");
   context.drawImage(bitmap, 0, 0);
-  const corner = Array.from(context.getImageData(0, 0, 1, 1).data);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const corner = Array.from(imageData.slice(0, 4));
+  const checksum = imageData.reduce((sum, value, index) => (sum + value * (index + 1)) >>> 0, 0);
   bitmap.close();
-  return { width: canvas.width, height: canvas.height, corner, header: Array.from(bytes.slice(0, 16)) };
+  return { width: canvas.width, height: canvas.height, corner, checksum, header: Array.from(bytes.slice(0, 16)) };
 }
 
 async function attemptDirectImageRecipe(recipeId: string) {
@@ -169,11 +214,11 @@ async function inspectZip(output: Pick<SerializedOutput, "bytes" | "type">) {
   return facts;
 }
 
-window.__omniImageHarness = { runImageRecipe, inspectPdf, inspectImage, attemptDirectImageRecipe, inspectZip };
+window.__omniImageHarness = { runImageRecipe, runImageInputFixture, inspectPdf, inspectImage, attemptDirectImageRecipe, inspectZip };
 document.getElementById("status")!.textContent = "ready";
 
 declare global {
   interface Window {
-    __omniImageHarness: { runImageRecipe: typeof runImageRecipe; inspectPdf: typeof inspectPdf; inspectImage: typeof inspectImage; attemptDirectImageRecipe: typeof attemptDirectImageRecipe; inspectZip: typeof inspectZip };
+    __omniImageHarness: { runImageRecipe: typeof runImageRecipe; runImageInputFixture: typeof runImageInputFixture; inspectPdf: typeof inspectPdf; inspectImage: typeof inspectImage; attemptDirectImageRecipe: typeof attemptDirectImageRecipe; inspectZip: typeof inspectZip };
   }
 }

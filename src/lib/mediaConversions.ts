@@ -1,6 +1,6 @@
 import { baseFileName, canvasToBlob, escapeHtml, zipLevelFromCompression, zipOutputs, type ConversionOutput } from "./conversionHelpers";
 import { ensureAudioEncoder } from "./audioEncoders";
-import { canConvertFfmpegAudioRecipe, convertFfmpegAudioRecipe, FFMPEG_AUDIO_RECIPE_IDS } from "./ffmpegAudioConversions";
+import { canConvertFfmpegAudioRecipe, convertFfmpegAudioRecipe, FFMPEG_AUDIO_RECIPE_IDS, normalizeAudioForBrowser } from "./ffmpegAudioConversions";
 import { resolveMediaTrimRange } from "./mediaTrim";
 import type { ConversionRecipe, ConversionSettings, FileInspection } from "./types";
 import type { LegacyExecutionContext } from "../engines/types";
@@ -27,6 +27,31 @@ const MEDIA_RECIPE_IDS = new Set([
   "video-to-webm",
   "video-to-audio"
 ]);
+
+const browserReadableAudioFiles = new WeakMap<File, Promise<File>>();
+
+function browserReadableAudioFile(file: File, execution?: LegacyExecutionContext) {
+  const cached = browserReadableAudioFiles.get(file);
+  if (cached) return cached;
+  const task = (async () => {
+    const media = await import("mediabunny");
+    const input = new media.Input({ source: new media.BlobSource(file), formats: media.ALL_FORMATS });
+    try {
+      if (await input.canRead()) {
+        const track = await input.getPrimaryAudioTrack();
+        if (track && await track.canDecode()) return file;
+      }
+    } catch {
+      // FFmpeg provides the compatibility path when native probing fails.
+    } finally {
+      input.dispose();
+    }
+    return normalizeAudioForBrowser(file, execution);
+  })();
+  browserReadableAudioFiles.set(file, task);
+  void task.catch(() => browserReadableAudioFiles.delete(file));
+  return task;
+}
 
 export function canConvertMediaRecipe(recipe: ConversionRecipe) {
   return MEDIA_RECIPE_IDS.has(recipe.id);
@@ -97,7 +122,8 @@ export async function convertMediaRecipe(
 
 async function convertAudioToWav(file: File, baseName: string, settings: ConversionSettings, execution?: LegacyExecutionContext): Promise<ConversionOutput> {
   const media = await import("mediabunny");
-  const input = new media.Input({ source: new media.BlobSource(file), formats: media.ALL_FORMATS });
+  const readableFile = await browserReadableAudioFile(file, execution);
+  const input = new media.Input({ source: new media.BlobSource(readableFile), formats: media.ALL_FORMATS });
   const target = new media.BufferTarget();
   try {
     if (!await input.canRead()) throw new Error("The audio container could not be parsed.");
@@ -156,7 +182,8 @@ async function convertAudioToFormat(
   execution?: LegacyExecutionContext
 ): Promise<ConversionOutput> {
   const media = await import("mediabunny");
-  const input = new media.Input({ source: new media.BlobSource(file), formats: media.ALL_FORMATS });
+  const readableFile = await browserReadableAudioFile(file, execution);
+  const input = new media.Input({ source: new media.BlobSource(readableFile), formats: media.ALL_FORMATS });
   const target = new media.BufferTarget();
   try {
     if (!await input.canRead()) throw new Error("The audio container could not be parsed.");
@@ -336,11 +363,12 @@ async function createWaveformOutput(file: File, baseName: string, settings: Conv
 
 async function createAudioVideo(file: File, baseName: string, settings: ConversionSettings, execution?: LegacyExecutionContext): Promise<ConversionOutput> {
   const media = await import("mediabunny");
+  const readableFile = await browserReadableAudioFile(file, execution);
   const size = audioVideoSize(settings.aspectRatio, settings.resolution);
   const fps = Math.max(1, Math.min(60, Number(settings.frameRate?.match(/\d+/)?.[0] ?? 24)));
   const waveform = await decodeWaveform(file, 220, settings, execution, { start: 5, end: 25 });
   const theme = waveformTheme(settings.color);
-  const input = new media.Input({ source: new media.BlobSource(file), formats: media.ALL_FORMATS });
+  const input = new media.Input({ source: new media.BlobSource(readableFile), formats: media.ALL_FORMATS });
   const target = new media.BufferTarget();
   const mp4 = settings.outputFormat === "MP4";
   const format = mp4 ? new media.Mp4OutputFormat({ fastStart: "in-memory" }) : new media.WebMOutputFormat();
@@ -386,8 +414,8 @@ async function createAudioVideo(file: File, baseName: string, settings: Conversi
     });
     output.addVideoTrack(videoSource);
     output.addAudioTrack(audioSource);
-    const visibleTitle = settings.metadata === "No title" ? "" : file.name.replace(/\.[^.]+$/, "");
-    if (visibleTitle) output.setMetadataTags({ title: visibleTitle });
+    const visibleTitle = settings.typography === "No title" || settings.metadata === "No title" ? "" : file.name.replace(/\.[^.]+$/, "");
+    if (visibleTitle && settings.metadata !== "Strip title tag") output.setMetadataTags({ title: visibleTitle });
 
     const cancel = () => void output.cancel();
     execution?.signal.addEventListener("abort", cancel, { once: true });
@@ -719,7 +747,8 @@ async function decodeWaveform(
   progressWindow: { start: number; end: number } = { start: 10, end: 90 }
 ) {
   const media = await import("mediabunny");
-  const input = new media.Input({ source: new media.BlobSource(file), formats: media.ALL_FORMATS });
+  const readableFile = await browserReadableAudioFile(file, execution);
+  const input = new media.Input({ source: new media.BlobSource(readableFile), formats: media.ALL_FORMATS });
   try {
     if (!await input.canRead()) throw new Error("The audio container could not be parsed.");
     const track = await input.getPrimaryAudioTrack();
@@ -931,10 +960,11 @@ function drawAudioVideoFrame(
   context.globalAlpha = 1;
 
   if (title) {
+    const typography = audioVideoTypography(settings.typography, Math.min(width, height));
     context.fillStyle = theme.text;
-    context.font = `600 ${Math.max(18, Math.round(Math.min(width, height) * 0.075))}px Georgia, serif`;
+    context.font = typography.font;
     context.textAlign = "center";
-    context.fillText(title.slice(0, 72), width / 2, padding * 1.45, width - padding * 2);
+    context.fillText(typography.transform(title).slice(0, 72), width / 2, padding * typography.offset, width - padding * 2);
   }
 
   const visual = settings.waveform ?? "Animated waveform";
@@ -966,6 +996,14 @@ function drawAudioVideoFrame(
   context.fillText(mediaTimestamp(progress * duration), padding, progressY + padding * 0.65);
   context.textAlign = "right";
   context.fillText(mediaTimestamp(duration), width - padding, progressY + padding * 0.65);
+}
+
+function audioVideoTypography(value: string | undefined, reference: number) {
+  const size = Math.max(18, Math.round(reference * 0.075));
+  if (value === "Modern sans") return { font: `600 ${size}px system-ui, sans-serif`, offset: 1.45, transform: (title: string) => title };
+  if (value === "Compact label") return { font: `700 ${Math.max(14, Math.round(size * 0.68))}px Arial Narrow, system-ui, sans-serif`, offset: 1.32, transform: (title: string) => title.toUpperCase() };
+  if (value === "Minimal mono") return { font: `500 ${Math.max(13, Math.round(size * 0.62))}px ui-monospace, monospace`, offset: 1.3, transform: (title: string) => title };
+  return { font: `600 ${size}px Georgia, serif`, offset: 1.45, transform: (title: string) => title };
 }
 
 function clipAudioBuffer(buffer: AudioBuffer, timestamp: number, range: { start: number; end: number }) {

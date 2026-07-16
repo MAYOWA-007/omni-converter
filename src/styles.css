@@ -73,6 +73,7 @@ a {
 
 .app-shell {
   position: relative;
+  isolation: isolate;
   width: 100%;
   height: 100dvh;
   overflow: hidden;
@@ -83,11 +84,11 @@ a {
 }
 
 .stage-drop {
-  --atlas-position: center 0%;
+  --wall-dark: #0a0b0c;
 }
 
 .stage-analyzing {
-  --atlas-position: center 33.333%;
+  --wall-dark: #e7dcc3;
   --ink: #342a20;
   --ink-strong: #18120d;
   --dim: #5c4d3f;
@@ -111,7 +112,7 @@ a {
 
 .stage-choose,
 .stage-processing {
-  --atlas-position: center 66.667%;
+  --wall-dark: #090908;
   --ink: #f1eee5;
   --ink-strong: #fffaf0;
   --dim: #c6beb0;
@@ -135,7 +136,7 @@ a {
 
 .stage-edit,
 .stage-results {
-  --atlas-position: center 100%;
+  --wall-dark: #06251d;
   --ink: #f3f4e8;
   --ink-strong: #fff9e8;
   --dim: #d2d6c5;
@@ -166,19 +167,48 @@ a {
 }
 
 .app-shell::before {
-  z-index: 0;
-  background-image: url("/omni-converter/assets/backgrounds/omni-limewash-atlas-2k.webp");
-  background-position: var(--atlas-position);
-  background-repeat: no-repeat;
-  background-size: 100% 400%;
+  z-index: 1;
+  background:
+    linear-gradient(90deg, rgba(255, 250, 240, 0.018), transparent 18%, transparent 82%, rgba(255, 250, 240, 0.018)),
+    linear-gradient(180deg, rgba(255, 250, 240, 0.028), transparent 28%, rgba(0, 0, 0, 0.07));
 }
 
 .app-shell::after {
-  z-index: 0;
+  z-index: 1;
   background:
     radial-gradient(circle at 50% 50%, transparent 0 42%, rgba(0, 0, 0, var(--edge-shadow)) 82%),
     linear-gradient(180deg, var(--top-glaze), transparent 38%, var(--bottom-glaze));
   transition: background 850ms var(--ease);
+}
+
+.stage-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--wall-dark);
+}
+
+.stage-backdrop__panel {
+  position: absolute;
+  inset: -1px;
+  opacity: 0;
+  background-image: url("/omni-converter/assets/backgrounds/omni-limewash-atlas-2k.webp");
+  background-position: var(--atlas-position);
+  background-repeat: no-repeat;
+  background-size: 100% 400%;
+  transform: translateZ(0);
+  transition: opacity 850ms var(--ease);
+  will-change: opacity;
+}
+
+.stage-backdrop__panel.is-active {
+  opacity: 1;
+}
+
+.screen {
+  z-index: 2;
 }
 
 .topbar {
@@ -369,7 +399,11 @@ a {
   width: min(42vmin, 430px);
   aspect-ratio: 1;
   place-items: center;
+  border: 0;
   border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  padding: 0;
   cursor: pointer;
   outline: none;
 }
@@ -386,17 +420,21 @@ a {
     transform 220ms var(--ease);
 }
 
-.drop-core input {
+.drop-input {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  inset: 0;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
   opacity: 0;
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .drop-copy {
   position: relative;
   z-index: 3;
+  pointer-events: none;
   display: inline-flex;
   min-width: 12.5rem;
   min-height: 3rem;
@@ -2101,5 +2139,160 @@ a {
 
   .media-edit-layout .stage-copy p {
     display: none;
+  }
+}
+
+/* Compact catalog and truthful media feedback. */
+.choose-screen {
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  gap: 0.62rem;
+}
+
+.choose-screen .stage-copy {
+  gap: 0.2rem;
+}
+
+.choose-screen .stage-copy h1 {
+  font-size: 2.65rem;
+  line-height: 1;
+  outline: 0;
+}
+
+.conversion-command-band {
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  display: grid;
+  width: min(980px, 100%);
+  grid-template-columns: minmax(280px, 1.35fr) minmax(320px, 1fr);
+  align-items: end;
+  gap: 0.72rem;
+  border-top: 1px solid color-mix(in srgb, var(--rule) 76%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--rule) 76%, transparent);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  box-shadow: 0 10px 24px color-mix(in srgb, #000 18%, transparent);
+  padding: 0.58rem 0;
+  backdrop-filter: blur(18px);
+}
+
+.conversion-command-band .conversion-search,
+.conversion-command-band .conversion-filters {
+  width: 100%;
+}
+
+.recipe-stage-grid {
+  display: grid;
+  width: min(1240px, 100%);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-content: start;
+  justify-content: stretch;
+  gap: 0.68rem;
+}
+
+.recipe-card {
+  width: 100%;
+  max-width: none;
+  min-height: 10.25rem;
+  grid-template-rows: auto auto 1fr auto auto;
+  align-content: start;
+  padding: 0.86rem 0.82rem;
+}
+
+.recipe-card p {
+  display: block;
+  max-width: 32ch;
+  overflow: visible;
+  font-size: 0.73rem;
+  line-height: 1.38;
+  -webkit-line-clamp: unset;
+}
+
+.media-timeline-track[data-waveform-state="loading"]::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(42%, 8rem);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--foil-bright) 58%, transparent), transparent);
+  content: "";
+  opacity: 0.55;
+  transform: translate(-50%, -50%);
+  animation: waveform-reading 1.4s ease-in-out infinite;
+}
+
+@keyframes waveform-reading {
+  0%, 100% { opacity: 0.2; transform: translate(-50%, -50%) scaleX(0.45); }
+  50% { opacity: 0.72; transform: translate(-50%, -50%) scaleX(1); }
+}
+
+.trim-range::-webkit-slider-thumb {
+  width: 1.5rem;
+  border-width: 0.42rem;
+  border-color: transparent;
+  background-clip: content-box;
+}
+
+.trim-range::-moz-range-thumb {
+  width: 1.5rem;
+  border-width: 0.42rem;
+  border-color: transparent;
+  background-clip: content-box;
+}
+
+@media (max-width: 1024px) {
+  .conversion-command-band {
+    grid-template-columns: 1fr;
+    gap: 0.48rem;
+  }
+
+  .recipe-stage-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .choose-screen {
+    gap: 0.48rem;
+  }
+
+  .choose-screen .stage-copy h1 {
+    font-size: 2rem;
+  }
+
+  .conversion-command-band {
+    gap: 0.38rem;
+    padding: 0.42rem 0;
+  }
+
+  .conversion-filters {
+    gap: 0.4rem;
+  }
+
+  .conversion-filters select {
+    padding-top: 0.48rem;
+    padding-bottom: 0.48rem;
+  }
+
+  .recipe-stage-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .recipe-card {
+    min-height: 0;
+  }
+
+  .timeline-play {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .media-time-row {
+    grid-template-columns: 2rem auto auto auto minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-timeline-track[data-waveform-state="loading"]::after {
+    animation: none;
   }
 }

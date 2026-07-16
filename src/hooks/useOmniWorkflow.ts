@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { browserRecipesForInspection } from "../core/catalog";
 import { fileLaunchBridge } from "../core/fileLaunchQueue";
-import { createJobController, type ConversionJob, type JobController, type JobError } from "../core/jobs";
+import type { ConversionJob, JobController, JobError } from "../core/jobs";
 import { engineCanCancel, engineForRecipe } from "../engines/registry";
 import type { EngineResult } from "../engines/types";
-import { inspectFile } from "../lib/fileInspection";
 import { getDeviceProfile, preflightRecipe } from "../lib/preflight";
 import type { ConversionRecipe, ConversionSettings, DeviceProfile, FileInspection, PreflightResult } from "../lib/types";
 
 export type OmniWorkflowStage = "drop" | "analyzing" | "choose" | "edit" | "processing" | "results";
-type ConversionCatalog = typeof import("../data/conversionMatrix");
+type ConversionCatalog = Awaited<ReturnType<typeof import("../core/catalog")["loadConversionCatalog"]>>;
 
 export interface OmniWorkflowOptions {
   createController?: () => JobController;
@@ -30,9 +28,9 @@ export type ConversionRunOutcome =
 
 export async function executeConversionJob(
   input: ConversionJobInput,
-  createController: () => JobController = () => createJobController()
+  createController?: () => JobController
 ): Promise<ConversionRunOutcome> {
-  const controller = createController();
+  const controller = createController?.() ?? (await import("../core/jobs")).createJobController();
   const created = controller.create(input);
   const job = await controller.start(created.id);
   const outputs = controller.getResult(created.id);
@@ -46,13 +44,6 @@ export async function executeConversionJob(
       at: job.updatedAt
     }
   };
-}
-
-let catalogPromise: Promise<ConversionCatalog> | null = null;
-
-function loadConversionCatalog() {
-  catalogPromise ??= import("../data/conversionMatrix");
-  return catalogPromise;
 }
 
 async function prepareConversionEngines() {
@@ -86,7 +77,7 @@ export function useOmniWorkflow(options: OmniWorkflowOptions = {}) {
   const eventTokenRef = useRef(0);
   const workflowTokenRef = useRef(0);
 
-  const recipes = useMemo(() => (inspection ? browserRecipesForInspection(inspection) : []), [inspection]);
+  const recipes = useMemo(() => (inspection && catalog ? catalog.browserRecipesForInspection(inspection) : []), [catalog, inspection]);
   const preflights = useMemo(() => {
     const map = new Map<string, PreflightResult>();
     if (!inspection || !device) return map;
@@ -132,7 +123,11 @@ export function useOmniWorkflow(options: OmniWorkflowOptions = {}) {
     setCanCancel(false);
 
     try {
-      const [nextInspection, nextCatalog, nextDevice] = await Promise.all([inspectFile(file), loadConversionCatalog(), getDeviceProfile()]);
+      const [nextInspection, nextCatalog, nextDevice] = await Promise.all([
+        import("../lib/fileInspection").then(({ inspectFile }) => inspectFile(file)),
+        import("../core/catalog").then(({ loadConversionCatalog }) => loadConversionCatalog()),
+        getDeviceProfile()
+      ]);
       if (inputAttemptRef.current !== attempt || workflowTokenRef.current !== workflowToken) return;
       setInspection(nextInspection);
       setCatalog(nextCatalog);
@@ -195,9 +190,12 @@ export function useOmniWorkflow(options: OmniWorkflowOptions = {}) {
     setCanCancel(false);
 
     try {
-      await (options.prepareEngines ?? prepareConversionEngines)();
+      const [, jobs] = await Promise.all([
+        (options.prepareEngines ?? prepareConversionEngines)(),
+        options.createController ? Promise.resolve(null) : import("../core/jobs")
+      ]);
       if (workflowTokenRef.current !== runToken) return;
-      const controller = options.createController?.() ?? createJobController();
+      const controller = options.createController?.() ?? jobs!.createJobController();
       if (workflowTokenRef.current !== runToken) return;
       controllerRef.current = controller;
       const created = controller.create({ file: sourceFile, inspection, recipe, settings });
@@ -227,7 +225,10 @@ export function useOmniWorkflow(options: OmniWorkflowOptions = {}) {
 
   const cancel = useCallback(() => {
     if (!job || !controllerRef.current) return;
-    controllerRef.current.cancel(job.id);
+    if (controllerRef.current.cancel(job.id)) {
+      const nextJob = controllerRef.current.get(job.id);
+      if (nextJob) setJob(nextJob);
+    }
   }, [job]);
 
   const retry = useCallback(() => {

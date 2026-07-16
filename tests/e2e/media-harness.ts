@@ -1,4 +1,5 @@
 import { BlobReader, BlobWriter, ZipReader } from "@zip.js/zip.js";
+import { browserRecipesForInspection } from "../../src/core/catalog";
 import { validateOutput } from "../../src/core/outputValidation";
 import { CONVERSION_RECIPES } from "../../src/data/conversionMatrix";
 import { VERIFIED_MEDIA_RECIPE_CONTRACTS } from "../../src/data/verifiedMediaRecipes";
@@ -20,6 +21,37 @@ const VIDEO_FIXTURES = {
   "video-webm": { url: new URL("../fixtures/video-tone.webm", import.meta.url).href, name: "Video Tone.webm", type: "video/webm" },
   "video-mp4": { url: new URL("../fixtures/video-tone.mp4", import.meta.url).href, name: "Video Tone.mp4", type: "video/mp4" }
 } as const;
+
+const EXPANDED_MEDIA_FIXTURES = {
+  wav: ["tone.wav", "Tone.wav", "audio/wav", "audio", "wav", "audio-to-wav"],
+  mp3: ["tone.mp3", "Tone.mp3", "audio/mpeg", "audio", "mp3", "audio-to-wav"],
+  flac: ["tone.flac", "Tone.flac", "audio/flac", "audio", "flac", "audio-to-wav"],
+  m4a: ["tone.m4a", "Tone.m4a", "audio/mp4", "audio", "m4a", "audio-to-wav"],
+  aac: ["tone.aac", "Tone.aac", "audio/aac", "audio", "aac", "audio-to-wav"],
+  ogg: ["tone.ogg", "Tone.ogg", "audio/ogg", "audio", "ogg", "audio-to-wav"],
+  opus: ["tone.opus", "Tone.opus", "audio/opus", "audio", "opus", "audio-to-wav"],
+  "audio-webm": ["tone.webm", "Tone.webm", "audio/webm", "audio", "webm", "audio-to-wav"],
+  mka: ["tone.mka", "Tone.mka", "audio/x-matroska", "audio", "mka", "audio-to-wav"],
+  "mka-ac3": ["tone-ac3.mka", "Tone AC3.mka", "audio/x-matroska", "audio", "mka", "audio-to-wav"],
+  "audio-mov": ["tone-audio.mov", "Tone.mov", "video/quicktime", "audio", "mov", "audio-to-wav"],
+  m4r: ["tone.m4r", "Tone.m4r", "audio/mp4", "audio", "m4r", "audio-to-wav"],
+  aiff: ["tone.aiff", "Tone.aiff", "audio/aiff", "audio", "aiff", "audio-to-wav"],
+  caf: ["tone.caf", "Tone.caf", "audio/x-caf", "audio", "caf", "audio-to-wav"],
+  ac3: ["tone.ac3", "Tone.ac3", "audio/ac3", "audio", "ac3", "audio-to-wav"],
+  eac3: ["tone.eac3", "Tone.eac3", "audio/eac3", "audio", "eac3", "audio-to-wav"],
+  oga: ["tone.oga", "Tone.oga", "audio/ogg", "audio", "oga", "audio-to-wav"],
+  wma: ["tone.wma", "Tone.wma", "audio/x-ms-wma", "audio", "wma", "audio-to-wav"],
+  wv: ["tone.wv", "Tone.wv", "audio/wavpack", "audio", "wv", "audio-to-wav"],
+  tta: ["tone.tta", "Tone.tta", "audio/x-tta", "audio", "tta", "audio-to-wav"],
+  mp2: ["tone.mp2", "Tone.mp2", "audio/mpeg", "audio", "mp2", "audio-to-wav"],
+  au: ["tone.au", "Tone.au", "audio/basic", "audio", "au", "audio-to-wav"],
+  w64: ["tone.w64", "Tone.w64", "audio/x-w64", "audio", "w64", "audio-to-wav"],
+  "3gp": ["tone.3gp", "Tone.3gp", "audio/3gpp", "audio", "3gp", "audio-to-wav"],
+  mov: ["video.mov", "Video.mov", "video/quicktime", "video", "mov", "video-to-mp4"],
+  m4v: ["video.m4v", "Video.m4v", "video/mp4", "video", "m4v", "video-to-mp4"],
+  mkv: ["video.mkv", "Video.mkv", "video/x-matroska", "video", "mkv", "video-to-mp4"],
+  ts: ["video.mpegts", "Video.ts", "video/mp2t", "video", "ts", "video-to-mp4"]
+} as const satisfies Record<string, readonly [fileName: string, uploadName: string, mime: string, family: "audio" | "video", exactFormat: string, canonicalRecipeId: string]>;
 
 function fixture(name = "Tone.wav", type = "audio/wav") {
   return new File([createSineWavBytes()], name, { type });
@@ -59,9 +91,10 @@ async function runMediaFormat(recipeId: string, format: keyof typeof FORMAT_FIXT
     resolution: "360p preview",
     frameRate: "12 fps",
     waveform: "Animated waveform",
+    typography: "Editorial serif",
     color: "Gold on charcoal",
     compression: "Balanced",
-    metadata: "Filename title",
+    metadata: "Embed title tag",
     batchNaming: "Converted suffix"
   } : {};
   return executeMediaRecipe(await formatFixture(format), recipeId, overrides);
@@ -69,6 +102,104 @@ async function runMediaFormat(recipeId: string, format: keyof typeof FORMAT_FIXT
 
 async function runVideoFixture(recipeId: string, fixtureId: keyof typeof VIDEO_FIXTURES, overrides: ConversionSettings = {}) {
   return executeMediaRecipe(await videoFixture(fixtureId), recipeId, overrides);
+}
+
+async function roundTripAudioRecipe(sourceRecipeId: string, targetRecipeId: string) {
+  const sourceContract = VERIFIED_MEDIA_RECIPE_CONTRACTS.find((entry) => entry.recipeId === sourceRecipeId);
+  const sourceRecipe = CONVERSION_RECIPES.find((entry) => entry.id === sourceRecipeId);
+  const targetContract = VERIFIED_MEDIA_RECIPE_CONTRACTS.find((entry) => entry.recipeId === targetRecipeId);
+  const targetRecipe = CONVERSION_RECIPES.find((entry) => entry.id === targetRecipeId);
+  if (!sourceContract || !sourceRecipe || !targetContract || !targetRecipe) throw new Error("Unknown audio round-trip recipe.");
+
+  const sourceFile = fixture();
+  const sourceOutputs = await convertRecipe(sourceFile, await inspectFile(sourceFile), sourceRecipe, sourceContract.fixtureSettings);
+  const sourceOutput = sourceOutputs[0];
+  if (!sourceOutput) throw new Error(`${sourceRecipeId} produced no output.`);
+
+  const uploadedFile = new File([sourceOutput.blob], sourceOutput.name, { type: sourceOutput.blob.type });
+  const inspection = await inspectFile(uploadedFile);
+  const availableRecipeIds = browserRecipesForInspection(inspection).map((recipe) => recipe.id);
+  const targetOutputs = await convertRecipe(uploadedFile, inspection, targetRecipe, targetContract.fixtureSettings);
+  const targetOutput = targetOutputs[0];
+  if (!targetOutput) throw new Error(`${targetRecipeId} produced no output.`);
+  const targetValidation = await validateOutput(targetOutput);
+
+  return {
+    source: { name: sourceOutput.name, size: sourceOutput.blob.size, validation: await validateOutput(sourceOutput) },
+    inspection,
+    availableRecipeIds,
+    target: { name: targetOutput.name, size: targetOutput.blob.size, validation: targetValidation }
+  };
+}
+
+async function verifyExpandedMediaFixture(fixtureId: keyof typeof EXPANDED_MEDIA_FIXTURES) {
+  const fixture = EXPANDED_MEDIA_FIXTURES[fixtureId];
+  const file = await expandedMediaFixture(fixtureId);
+  const sourceSupport = await nativeMediaSupport(file);
+  const inspection = await inspectFile(file);
+  const availableRecipeIds = browserRecipesForInspection(inspection).map((recipe) => recipe.id);
+  const recipe = CONVERSION_RECIPES.find((entry) => entry.id === fixture[5]);
+  const contract = VERIFIED_MEDIA_RECIPE_CONTRACTS.find((entry) => entry.recipeId === fixture[5]);
+  if (!recipe || !contract) throw new Error(`Missing canonical media contract: ${fixture[5]}`);
+
+  const outputs = await convertRecipe(file, inspection, recipe, contract.fixtureSettings);
+  const output = outputs[0];
+  if (!output) throw new Error(`${fixture[5]} produced no output for ${fixtureId}.`);
+  const validation = await validateOutput(output);
+  const reopenedFile = new File([output.blob], output.name, { type: output.blob.type });
+
+  return {
+    expected: { family: fixture[3], exactFormat: fixture[4], canonicalRecipeId: fixture[5] },
+    sourceSupport,
+    inspection,
+    availableRecipeIds,
+    output: {
+      name: output.name,
+      size: output.blob.size,
+      validation: { valid: validation.valid, detectedFormat: validation.detectedFormat, errors: validation.errors },
+      inspection: await inspectFile(reopenedFile),
+      nativeSupport: await nativeMediaSupport(reopenedFile)
+    }
+  };
+}
+
+async function expandedMediaFixture(fixtureId: keyof typeof EXPANDED_MEDIA_FIXTURES) {
+  const [fileName, uploadName, mime] = EXPANDED_MEDIA_FIXTURES[fixtureId];
+  const response = await fetch(new URL(`../fixtures/media/${fileName}`, import.meta.url).href);
+  if (!response.ok) throw new Error(`Could not load expanded media fixture ${fixtureId}.`);
+  return new File([await response.blob()], uploadName, { type: mime });
+}
+
+async function nativeMediaSupport(file: File) {
+  const media = await import("mediabunny");
+  const input = new media.Input({ source: new media.BlobSource(file), formats: media.ALL_FORMATS });
+  try {
+    const containerReadable = await input.canRead();
+    if (!containerReadable) return { containerReadable, audioDecodable: false, videoDecodable: false };
+    const [audio, video] = await Promise.all([input.getPrimaryAudioTrack(), input.getPrimaryVideoTrack()]);
+    return {
+      containerReadable,
+      audioDecodable: audio ? await audio.canDecode() : null,
+      videoDecodable: video ? await video.canDecode() : null
+    };
+  } catch {
+    return { containerReadable: false, audioDecodable: false, videoDecodable: false };
+  } finally {
+    input.dispose();
+  }
+}
+
+async function cancelFfmpegAudioInspection() {
+  const module = await import("../../src/lib/ffmpegAudioConversions");
+  const inspect = module.inspectFfmpegAudio as unknown as (file: File, signal?: AbortSignal) => Promise<unknown>;
+  const controller = new AbortController();
+  controller.abort();
+  try {
+    await inspect(fixture("Canceled.aiff", "audio/aiff"), controller.signal);
+    return { canceled: false };
+  } catch (error) {
+    return { canceled: true, error: error instanceof Error ? error.name : "UnknownError" };
+  }
 }
 
 async function inspectOutputMedia(bytes: number[], name: string, type: string) {
@@ -253,6 +384,9 @@ declare global {
       runMediaRecipe: typeof runMediaRecipe;
       runMediaFormat: typeof runMediaFormat;
       runVideoFixture: typeof runVideoFixture;
+      roundTripAudioRecipe: typeof roundTripAudioRecipe;
+      verifyExpandedMediaFixture: typeof verifyExpandedMediaFixture;
+      cancelFfmpegAudioInspection: typeof cancelFfmpegAudioInspection;
       cancelWavConversion: typeof cancelWavConversion;
       cancelFfmpegAudioConversion: typeof cancelFfmpegAudioConversion;
       inspectWav: typeof inspectWav;
@@ -265,5 +399,5 @@ declare global {
   }
 }
 
-window.__omniMediaHarness = { inspectFixture, inspectFormat, probeEncoders, runMediaRecipe, runMediaFormat, runVideoFixture, cancelWavConversion, cancelFfmpegAudioConversion, inspectWav, inspectFlac, inspectOutputMedia, inspectVideoFixture, inspectRaster, unzip };
+window.__omniMediaHarness = { inspectFixture, inspectFormat, probeEncoders, runMediaRecipe, runMediaFormat, runVideoFixture, roundTripAudioRecipe, verifyExpandedMediaFixture, cancelFfmpegAudioInspection, cancelWavConversion, cancelFfmpegAudioConversion, inspectWav, inspectFlac, inspectOutputMedia, inspectVideoFixture, inspectRaster, unzip };
 document.getElementById("status")!.textContent = "ready";

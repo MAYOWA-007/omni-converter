@@ -1,37 +1,43 @@
 import type { FileFamily, FileInspection } from "./types";
 import { hasBundledAudioEncoder } from "./audioEncoders";
+import { inspectFfmpegAudio } from "./ffmpegAudioConversions";
 
 export async function inspectMediaContainer(file: File, fallbackFamily: "audio" | "video"): Promise<Partial<FileInspection>> {
   const media = await import("mediabunny");
   const input = new media.Input({ source: new media.BlobSource(file), formats: media.ALL_FORMATS });
   try {
-    if (!await input.canRead()) return unreadable(fallbackFamily);
+    if (!await input.canRead()) return fallbackMediaInspection(file, fallbackFamily);
     const [format, videoTrack, audioTrack] = await Promise.all([
       input.getFormat(),
       input.getPrimaryVideoTrack(),
       input.getPrimaryAudioTrack()
     ]);
-    if (!videoTrack && !audioTrack) return unreadable(fallbackFamily);
+    if (!videoTrack && !audioTrack) return fallbackMediaInspection(file, fallbackFamily);
 
     const family: FileFamily = videoTrack ? "video" : "audio";
     const exactFormat = mediaFormatId(format.mimeType, family, file.name);
     const duration = await input.computeDuration();
-    const [width, height, videoCodec, sampleRate, audioChannels, audioCodec, mp4Video, webmVideo, webmAudio] = await Promise.all([
+    const [width, height, videoCodec, sampleRate, audioChannels, audioCodec, videoDecodable, audioDecodable, mp4Video, webmVideo, webmAudio] = await Promise.all([
       videoTrack?.getDisplayWidth(),
       videoTrack?.getDisplayHeight(),
       videoTrack?.getCodec(),
       audioTrack?.getSampleRate(),
       audioTrack?.getNumberOfChannels(),
       audioTrack?.getCodec(),
+      videoTrack?.canDecode(),
+      audioTrack?.canDecode(),
       media.getFirstEncodableVideoCodec(["avc"], { width: 640, height: 360 }),
       media.getFirstEncodableVideoCodec(["vp9", "vp8"], { width: 640, height: 360 }),
       media.getFirstEncodableAudioCodec(["opus"], { numberOfChannels: 1, sampleRate: 48_000 })
     ]);
+    if (videoTrack && !videoDecodable) return unreadable("video");
+    if (audioTrack && !audioDecodable) return videoTrack ? unreadable("video") : fallbackMediaInspection(file, "audio");
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
     const notes = [
       `${format.name} container: ${formatDuration(duration)}.`,
       ...(videoTrack ? [`Video: ${width} x ${height}${videoCodec ? ` / ${videoCodec}` : ""}.`] : []),
       ...(audioTrack ? [`Audio: ${sampleRate} Hz / ${audioChannels} channel${audioChannels === 1 ? "" : "s"}${audioCodec ? ` / ${audioCodec}` : ""}.`] : []),
+      "Decode path: browser.",
       ...(extension && !extensionsMatch(exactFormat, extension) ? [`File extension .${extension} does not match detected ${exactFormat.toUpperCase()} media content.`] : [])
     ];
     return {
@@ -49,7 +55,7 @@ export async function inspectMediaContainer(file: File, fallbackFamily: "audio" 
       notes
     };
   } catch {
-    return unreadable(fallbackFamily);
+    return fallbackMediaInspection(file, fallbackFamily);
   } finally {
     input.dispose();
   }
@@ -92,21 +98,24 @@ export async function sampleMediaTimelinePeaks(file: File, pointCount = 180, sig
 }
 
 function mediaFormatId(mimeType: string, family: FileFamily, name: string) {
-  if (mimeType === "video/mp4") {
-    const extension = name.split(".").pop()?.toLowerCase();
-    if (family === "audio" && extension === "m4a") return "m4a";
+  const extension = name.split(".").pop()?.toLowerCase() ?? "";
+  const normalizedMimeType = mimeType.toLowerCase();
+  if (normalizedMimeType === "video/mp4") {
+    if (family === "audio" && ["m4a", "m4r", "3gp"].includes(extension)) return extension;
     if (extension === "m4v") return "m4v";
     return "mp4";
   }
-  if (mimeType === "video/quicktime") return "mov";
-  if (mimeType === "video/webm") return "webm";
-  if (mimeType === "video/x-matroska") return "mkv";
-  if (mimeType === "audio/mpeg") return "mp3";
-  if (mimeType === "audio/wav") return "wav";
-  if (mimeType === "audio/ogg" || mimeType === "application/ogg") return "ogg";
-  if (mimeType === "audio/flac") return "flac";
-  if (mimeType === "audio/aac") return "aac";
-  if (mimeType === "video/mp2t") return "ts";
+  if (normalizedMimeType === "video/quicktime") return "mov";
+  if (normalizedMimeType === "video/webm") return "webm";
+  if (normalizedMimeType === "video/x-matroska") return family === "audio" && extension === "mka" ? "mka" : "mkv";
+  if (normalizedMimeType === "audio/mp4") return ["m4r", "3gp"].includes(extension) ? extension : "m4a";
+  if (normalizedMimeType === "audio/mpeg") return extension === "mp2" ? "mp2" : "mp3";
+  if (normalizedMimeType === "audio/wav") return "wav";
+  if (normalizedMimeType === "audio/ogg" || normalizedMimeType === "application/ogg") return ["oga", "opus"].includes(extension) ? extension : "ogg";
+  if (normalizedMimeType === "audio/flac") return "flac";
+  if (normalizedMimeType === "audio/aac") return "aac";
+  if (normalizedMimeType === "video/mp2t") return "ts";
+  if (family === "audio" && AUDIO_EXTENSION_FORMATS[extension]) return AUDIO_EXTENSION_FORMATS[extension];
   return "unrecognized-media";
 }
 
@@ -117,6 +126,36 @@ function extensionsMatch(format: string, extension: string) {
 
 function unreadable(family: "audio" | "video"): Partial<FileInspection> {
   return { family, exactFormat: "unrecognized-media", signatureSource: "unknown", notes: ["The media container could not be parsed, so conversion options are unavailable."] };
+}
+
+const AUDIO_EXTENSION_FORMATS: Readonly<Record<string, string>> = {
+  wav: "wav", mp3: "mp3", mp2: "mp2", flac: "flac", m4a: "m4a", m4r: "m4r", aac: "aac",
+  ogg: "ogg", oga: "oga", opus: "opus", webm: "webm", mka: "mka", mov: "mov",
+  aif: "aiff", aiff: "aiff", aifc: "aiff", caf: "caf", ac3: "ac3", eac3: "eac3", ec3: "eac3",
+  wma: "wma", asf: "wma", wv: "wv", tta: "tta", au: "au", snd: "au", w64: "w64", "3gp": "3gp"
+};
+
+async function fallbackMediaInspection(file: File, family: "audio" | "video"): Promise<Partial<FileInspection>> {
+  if (family !== "audio") return unreadable(family);
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const exactFormat = AUDIO_EXTENSION_FORMATS[extension];
+  if (!exactFormat) return unreadable(family);
+  try {
+    const facts = await inspectFfmpegAudio(file);
+    return {
+      family: "audio",
+      exactFormat,
+      signatureSource: "signature",
+      ...facts,
+      notes: [
+        `Audio container: ${facts.containerFormat ?? exactFormat}; ${formatDuration(facts.duration ?? Number.NaN)}.`,
+        `Audio: ${facts.sampleRate ?? "unknown"} Hz / ${facts.audioChannels ?? "unknown"} channels${facts.audioCodec ? ` / ${facts.audioCodec}` : ""}.`,
+        "Decode path: FFmpeg WASM."
+      ]
+    };
+  } catch {
+    return unreadable(family);
+  }
 }
 
 function formatDuration(seconds: number) {

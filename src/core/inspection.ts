@@ -1,6 +1,6 @@
-import { BlobReader, ZipReader } from "@zip.js/zip.js";
 import { normalizeArchivePath } from "./archivePaths";
 import { FORMAT_REGISTRY, type ExactFormatId, type FormatDefinition } from "./formats";
+import { findFormatByExtension, findFormatByMime } from "./formatUniverse";
 import { evaluateInputRisk, type ArchiveEntryFact, type InputRiskEvaluation } from "./riskLimits";
 
 export const MAX_FILE_HEADER_BYTES = 512;
@@ -16,17 +16,22 @@ export async function inspectFileHeader(file: File): Promise<DetectedFormat> {
   const header = new Uint8Array(await file.slice(0, MAX_FILE_HEADER_BYTES).arrayBuffer());
   const formatId = detectSignature(header);
 
-  if (formatId !== "zip") return detected(FORMAT_REGISTRY[formatId], formatId === "unknown" ? "unknown" : "signature");
+  if (formatId !== "unknown" && formatId !== "zip") return detected(FORMAT_REGISTRY[formatId], "signature");
 
-  const archiveEntries = await inspectZipEntries(file);
-  if (!archiveEntries) {
-    return {
-      ...detected(FORMAT_REGISTRY.zip, "signature"),
-      risk: { blocked: true, reasons: ["ZIP metadata could not be inspected."] }
-    };
+  if (formatId === "zip") {
+    const archiveEntries = await inspectZipEntries(file);
+    if (!archiveEntries) {
+      return {
+        ...detected(FORMAT_REGISTRY.zip, "signature"),
+        risk: { blocked: true, reasons: ["ZIP metadata could not be inspected."] }
+      };
+    }
+    const ooxmlFormat = detectOoxmlFormat(archiveEntries);
+    return detected(FORMAT_REGISTRY[ooxmlFormat], "signature", archiveEntries);
   }
-  const ooxmlFormat = detectOoxmlFormat(archiveEntries);
-  return detected(FORMAT_REGISTRY[ooxmlFormat], "signature", archiveEntries);
+
+  const broadFormat = await detectBroadSignature(file);
+  return detected(broadFormat ?? FORMAT_REGISTRY.unknown, broadFormat ? "signature" : "unknown");
 }
 
 function detected(format: FormatDefinition, source: DetectedFormat["source"], archiveEntries?: readonly ArchiveEntryFact[]): DetectedFormat {
@@ -48,7 +53,18 @@ function matches(bytes: Uint8Array, signature: readonly number[], offset = 0) {
   return signature.every((byte, index) => bytes[offset + index] === byte);
 }
 
+async function detectBroadSignature(file: File): Promise<FormatDefinition | undefined> {
+  try {
+    const { fileTypeFromBlob } = await import("file-type");
+    const result = await fileTypeFromBlob(file);
+    return result ? findFormatByExtension(result.ext) ?? findFormatByMime(result.mime) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function inspectZipEntries(file: File): Promise<ArchiveEntryFact[] | undefined> {
+  const { BlobReader, ZipReader } = await import("@zip.js/zip.js");
   const reader = new ZipReader(new BlobReader(file));
   try {
     const entries = await reader.getEntries();

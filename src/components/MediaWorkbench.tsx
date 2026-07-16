@@ -103,7 +103,7 @@ export function MediaWorkbench({ file, inspection, settings, onSettingsChange }:
           <output data-testid="trim-end-time">{formatTimelineTime(range.end)}</output>
           <output className="trim-duration" data-testid="trim-duration">{formatTimelineTime(range.duration)}</output>
         </div>
-        <div className="media-timeline-track" style={timelineStyle}>
+        <div className="media-timeline-track" data-waveform-state={peaks.length ? "ready" : "loading"} style={timelineStyle}>
           <canvas ref={canvasRef} aria-label="Media waveform" />
           <span className="trim-selection" aria-hidden="true" />
           <input className="trim-range trim-start" aria-label="Trim start" type="range" min={0} max={sourceDuration} step={step} value={range.start} onChange={(event) => updateRange(Number(event.target.value), range.end)} />
@@ -132,10 +132,10 @@ function drawWaveform(canvas: HTMLCanvasElement, peaks: number[]) {
   context.clearRect(0, 0, width, height);
   const styles = getComputedStyle(canvas);
   context.fillStyle = styles.getPropertyValue("--timeline-wave").trim() || "#d7b76d";
-  const values = peaks.length ? peaks : Array.from({ length: 72 }, (_, index) => 0.16 + Math.sin(index * 0.72) ** 2 * 0.12);
-  const barWidth = width / values.length;
-  for (let index = 0; index < values.length; index += 1) {
-    const amplitude = Math.max(1, values[index] * height * 0.82);
+  if (!peaks.length) return;
+  const barWidth = width / peaks.length;
+  for (let index = 0; index < peaks.length; index += 1) {
+    const amplitude = Math.max(1, peaks[index] * height * 0.82);
     context.fillRect(index * barWidth, (height - amplitude) / 2, Math.max(1, barWidth * 0.5), amplitude);
   }
 }

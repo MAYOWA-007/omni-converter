@@ -1,11 +1,20 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$Root = (Split-Path -Parent $PSScriptRoot)
+    [string]$Root
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+if ([string]::IsNullOrWhiteSpace($Root)) {
+    $scriptRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        Split-Path -Parent $MyInvocation.MyCommand.Path
+    } else {
+        $PSScriptRoot
+    }
+    $Root = Split-Path -Parent $scriptRoot
+}
 
 $resolvedRoot = (Resolve-Path -LiteralPath $Root -ErrorAction Stop).Path
 if (-not (Test-Path -LiteralPath $resolvedRoot -PathType Container)) {

@@ -42,6 +42,44 @@ test("recognizes required bounded signatures before MIME or extension", async ()
   }
 });
 
+test("lazily recognizes broad signatures that are outside first-party checks", async () => {
+  const wav = fileFromBytes("recording.bin", [
+    0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00,
+    0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20,
+    0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+    0x44, 0xac, 0x00, 0x00, 0x88, 0x58, 0x01, 0x00,
+    0x02, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61,
+    0x00, 0x00, 0x00, 0x00
+  ], "application/octet-stream");
+
+  const detected = await inspectFileHeader(wav);
+
+  expect(detected.format.id).toBe("wav");
+  expect(detected.source).toBe("signature");
+});
+
+test("uses byte signatures ahead of conflicting MIME and extension facts", async () => {
+  const inspection = await inspectFile(fileFromBytes(
+    "definitely-a-picture.png",
+    [0x25, 0x50, 0x44, 0x46, 0x2d],
+    "image/png"
+  ));
+
+  expect(inspection).toMatchObject({ family: "pdf", exactFormat: "pdf", signatureSource: "signature" });
+});
+
+test("uses MIME ahead of extension when bytes have no known signature", async () => {
+  const inspection = await inspectFile(fileFromBytes("misnamed.png", [0x68, 0x65, 0x6c, 0x6c, 0x6f], "font/woff2"));
+
+  expect(inspection).toMatchObject({ family: "font", exactFormat: "woff2", signatureSource: "mime" });
+});
+
+test("falls back to normalized extension when bytes and MIME are unknown", async () => {
+  const inspection = await inspectFile(fileFromBytes("scene.GLB", [0x68, 0x65, 0x6c, 0x6c, 0x6f], ""));
+
+  expect(inspection).toMatchObject({ family: "model3d", exactFormat: "glb", signatureSource: "extension" });
+});
+
 test("uses valid ZIP entry names to distinguish OOXML containers without extraction", async () => {
   const cases = [
     ["report.zip", "word/document.xml", "docx"],

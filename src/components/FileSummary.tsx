@@ -1,6 +1,6 @@
 import { Cpu, Database, FileScan } from "lucide-react";
 import { FAMILY_LABELS } from "../data/conversionMatrix";
-import { formatBytes, formatDuration } from "../lib/fileInspection";
+import { formatBytes, formatDuration } from "../lib/formatting";
 import type { DeviceProfile, FileInspection } from "../lib/types";
 
 interface FileSummaryProps {

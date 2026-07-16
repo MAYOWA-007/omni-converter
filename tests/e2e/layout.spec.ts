@@ -71,6 +71,32 @@ test("keeps the top promise available without becoming a hit target", async ({ p
   await expect(promise).toBeVisible();
 });
 
+test("crossfades fixed material backdrops across workflow stages", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.locator(".stage-backdrop__panel")).toHaveCount(4);
+  await expect(page.locator('.stage-backdrop__panel.is-active[data-theme="oxblood"]')).toHaveCount(1);
+
+  const transition = await page.locator(".stage-backdrop__panel").first().evaluate((node) => {
+    const style = getComputedStyle(node as HTMLElement);
+    return {
+      property: style.transitionProperty,
+      willChange: style.willChange,
+      backgroundSize: style.backgroundSize,
+    };
+  });
+  expect(transition.property).toContain("opacity");
+  expect(transition.willChange).toContain("opacity");
+  expect(transition.backgroundSize).toContain("400%");
+
+  await uploadPng(page);
+  await expect(page.getByRole("button", { name: "Image to PDF" })).toBeVisible();
+  await expect(page.locator('.stage-backdrop__panel.is-active[data-theme="soot"]')).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Image to PDF" }).click();
+  await expect(page.locator('.stage-backdrop__panel.is-active[data-theme="emerald"]')).toHaveCount(1);
+});
+
 test("contains every workflow stage inside the viewport", async ({ page }) => {
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);

@@ -2,6 +2,27 @@ import { expect, test } from "playwright/test";
 
 const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 
+async function loadedJavaScript(page: import("playwright/test").Page) {
+  return page.evaluate(async () => {
+    const urls = performance.getEntriesByType("resource")
+      .map((entry) => entry.name)
+      .filter((url) => /\.js(?:$|\?)/.test(url));
+    return Promise.all(urls.map(async (url) => ({ url, source: await fetch(url).then((response) => response.text()) })));
+  });
+}
+
+test("loads recipes only after intake and keeps ZIP code off the initial route", async ({ page }) => {
+  await page.goto("/");
+
+  const initialScripts = await loadedJavaScript(page);
+  expect(initialScripts.some(({ url }) => /zip-engine/i.test(url))).toBe(false);
+  expect(initialScripts.some(({ source }) => source.includes("image-to-motion-card"))).toBe(false);
+
+  await page.locator('input[type="file"]').setInputFiles({ name: "intake.png", mimeType: "image/png", buffer: PNG_BYTES });
+  await expect(page.getByRole("heading", { name: "What should it become?" })).toBeVisible();
+  await expect.poll(async () => (await loadedJavaScript(page)).some(({ source }) => source.includes("image-to-motion-card"))).toBe(true);
+});
+
 test("starts with a nonblank lightweight vortex fallback and upgrades to a bounded canvas", async ({ page }) => {
   await page.goto("/");
   const fallback = page.locator(".vortex-fallback");
@@ -125,7 +146,7 @@ test("keeps long-task budgets after the lazy Three upgrade", async ({ page }) =>
   expect(metrics?.longTasks.slice(observedBeforeProbe).some((duration) => duration >= 50)).toBe(true);
 });
 
-test("keeps the animated drop scene on compact compositor surfaces at a smooth cadence", async ({ page }) => {
+test("adapts the drop scene from an idle cadence to an interactive cadence", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/");
@@ -133,7 +154,11 @@ test("keeps the animated drop scene on compact compositor surfaces at a smooth c
   await expect(canvas).toBeVisible({ timeout: 5_000 });
   await expect.poll(() => page.evaluate(() => window.__omniVortex?.frames ?? 0), { timeout: 5_000 }).toBeGreaterThan(1);
 
-  const startingFrames = await page.evaluate(() => window.__omniVortex?.frames ?? 0);
+  const idleStart = await page.evaluate(() => window.__omniVortex?.frames ?? 0);
+  await page.waitForTimeout(2_000);
+  const idleEnd = await page.evaluate(() => window.__omniVortex?.frames ?? 0);
+  await page.locator(".drop-core").hover();
+  const interactiveStart = await page.evaluate(() => window.__omniVortex?.frames ?? 0);
   await page.waitForTimeout(2_000);
   const metrics = await page.evaluate(() => {
     const canvasNode = document.querySelector<HTMLCanvasElement>("canvas[data-vortex-scene]");
@@ -153,13 +178,38 @@ test("keeps the animated drop scene on compact compositor surfaces at a smooth c
     };
   });
 
-  expect(metrics.frames - startingFrames).toBeGreaterThanOrEqual(90);
+  expect(idleEnd - idleStart).toBeGreaterThanOrEqual(46);
+  expect(idleEnd - idleStart).toBeLessThanOrEqual(64);
+  expect(metrics.frames - interactiveStart).toBeGreaterThanOrEqual(92);
+  expect(metrics.frames - interactiveStart).toBeLessThanOrEqual(124);
   expect(metrics.canvasWidth).toBeLessThanOrEqual(600);
   expect(metrics.canvasHeight).toBeLessThanOrEqual(600);
   expect(metrics.canvasBufferArea).toBeLessThanOrEqual(600_000);
   expect(metrics.preserveDrawingBuffer).toBe(false);
   expect(metrics.backgroundHeight).toBeLessThanOrEqual(901);
   expect(metrics.backgroundFilter).toBe("none");
+});
+
+test("keeps large-file intake free of conversion tasks over 200ms", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => {
+    const chunk = new Uint8Array(1024 * 1024).fill(0x41);
+    const file = new File(Array.from({ length: 24 }, () => chunk), "large-notes.txt", { type: "text/plain" });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    (window as Window & { __omniLargeFile?: FileList }).__omniLargeFile = transfer.files;
+  });
+  await page.waitForTimeout(250);
+  const before = await page.evaluate(() => window.__omniPerformance?.longTasks.length ?? 0);
+  await page.locator('input[type="file"]').evaluate((input) => {
+    const largeFile = (window as Window & { __omniLargeFile?: FileList }).__omniLargeFile;
+    if (!largeFile) throw new Error("Large-file fixture was not prepared.");
+    Object.defineProperty(input, "files", { configurable: true, value: largeFile });
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(page.getByRole("heading", { name: "What should it become?" })).toBeVisible();
+  const durations = await page.evaluate((start) => window.__omniPerformance?.longTasks.slice(start) ?? [], before);
+  expect(Math.max(0, ...durations)).toBeLessThanOrEqual(200);
 });
 
 test("keeps the sphere nonblank and changes frames when motion is allowed", async ({ page }) => {

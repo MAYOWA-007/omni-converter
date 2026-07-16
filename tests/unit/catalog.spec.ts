@@ -1,5 +1,5 @@
 import { expect, test } from "playwright/test";
-import { browserRecipesForFamily, deriveRecipeAvailability, recipeSupportsInspection, verifiedRecipesForFamily } from "../../src/core/catalog";
+import { browserRecipesForFamily, deriveRecipeAvailability, loadConversionCatalog, recipeSupportsInspection, verifiedRecipesForFamily } from "../../src/core/catalog";
 import { VERIFIED_IMAGE_RECIPE_CONTRACTS } from "../../src/data/verifiedImageRecipes";
 
 test("implemented without fixtures is not selectable", () => {
@@ -20,6 +20,14 @@ test("normal browser catalog excludes image paths without passing fixtures", () 
   expect(ids).not.toContain("image-to-avif");
   expect(ids).not.toContain("image-ocr-text");
   expect(ids).not.toContain("image-to-motion-card");
+});
+
+test("loads and reuses the conversion catalog on demand", async () => {
+  const first = loadConversionCatalog();
+  const second = loadConversionCatalog();
+
+  expect(second).toBe(first);
+  await expect(first).resolves.toMatchObject({ CONVERSION_RECIPES: expect.any(Array) });
 });
 
 test("exact input-format gates prevent legacy or mislabeled routes from being offered", () => {

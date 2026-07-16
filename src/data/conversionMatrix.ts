@@ -44,6 +44,7 @@ export const DEFAULT_CONTROL_OPTIONS: Record<EditorControl, string[]> = {
   audioChannels: ["Source channels", "Mono", "Stereo"],
   bitDepth: ["16-bit PCM", "24-bit PCM", "32-bit float"],
   waveform: ["None", "PNG waveform", "SVG waveform", "Audiogram background", "Timeline peaks JSON"],
+  typography: ["Editorial serif", "Modern sans", "Compact label", "Minimal mono", "No title"],
   captions: ["None", "Import SRT", "Import VTT", "Export SRT", "Export VTT", "Burn in later", "Transcript package"],
   color: ["Original", "sRGB", "Display P3", "Grayscale", "CMYK prep", "Transparent matte", "White matte", "Black matte"],
   compression: ["Lossless", "Maximum quality", "High quality", "Balanced", "Small file", "Tiny preview", "Custom"],
@@ -134,7 +135,32 @@ function videoTranscodeOptions() {
 }
 
 const MEDIA_TRIM_OPTIONS = ["Full file", "First 1 second", "First 5 seconds", "First 15 seconds", "First 30 seconds", "Custom range"];
-const AUDIO_INPUT_FORMATS = ["wav", "mp3", "ogg", "flac", "aac", "m4a"];
+const VIDEO_INPUT_FORMATS = ["mp4", "webm", "mov", "m4v", "mkv", "ts"];
+const AUDIO_INPUT_FORMATS = [
+  "wav",
+  "mp3",
+  "flac",
+  "m4a",
+  "aac",
+  "ogg",
+  "opus",
+  "webm",
+  "mka",
+  "mov",
+  "m4r",
+  "aiff",
+  "caf",
+  "ac3",
+  "eac3",
+  "oga",
+  "wma",
+  "wv",
+  "tta",
+  "mp2",
+  "au",
+  "w64",
+  "3gp"
+];
 const AUDIO_SAMPLE_RATE_OPTIONS = ["Source sample rate", "44.1 kHz", "48 kHz", "96 kHz"];
 const AUDIO_CHANNEL_OPTIONS = ["Source channels", "Mono", "Stereo"];
 const AUDIO_BITRATE_OPTIONS = ["320 kbps", "256 kbps", "192 kbps", "160 kbps", "128 kbps", "96 kbps", "64 kbps"];
@@ -753,7 +779,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "video-to-frames",
     input: ["video"],
-    inputFormats: ["mp4", "webm"],
+    inputFormats: VIDEO_INPUT_FORMATS,
     category: "Frames",
     output: "Frame ZIP",
     title: "Video to image frames",
@@ -778,7 +804,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "video-to-mp4",
     input: ["video"],
-    inputFormats: ["mp4", "webm"],
+    inputFormats: VIDEO_INPUT_FORMATS,
     category: "Video format",
     output: "MP4",
     title: "Video to MP4",
@@ -794,7 +820,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "video-to-webm",
     input: ["video"],
-    inputFormats: ["mp4", "webm"],
+    inputFormats: VIDEO_INPUT_FORMATS,
     category: "Video format",
     output: "WebM",
     title: "Video to WebM",
@@ -823,7 +849,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "video-to-audio",
     input: ["video"],
-    inputFormats: ["mp4", "webm"],
+    inputFormats: VIDEO_INPUT_FORMATS,
     category: "Audio extraction",
     output: "Audio",
     title: "Video to audio file",
@@ -847,7 +873,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "video-thumbnail-sheet",
     input: ["video"],
-    inputFormats: ["mp4", "webm"],
+    inputFormats: VIDEO_INPUT_FORMATS,
     category: "Frames",
     output: "Contact sheet",
     title: "Video thumbnail contact sheet",
@@ -1301,7 +1327,7 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     description: "Encode audio and a generated waveform or progress visual directly into MP4 or WebM without real-time playback.",
     treatments: ["Waveform video", "MP4 AVC/AAC", "WebM VP9/Opus", "Title metadata"],
     keywords: ["audio", "video", "music", "podcast", "audiogram", "waveform", "mp4", "webm", "sound"],
-    editorControls: ["outputFormat", "trim", "aspectRatio", "resolution", "frameRate", "waveform", "color", "compression", "metadata", "batchNaming"],
+    editorControls: ["outputFormat", "trim", "aspectRatio", "resolution", "frameRate", "waveform", "typography", "color", "compression", "metadata", "batchNaming"],
     controlOptions: {
       outputFormat: ["WebM", "MP4"],
       trim: MEDIA_TRIM_OPTIONS,
@@ -1309,9 +1335,10 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
       resolution: ["1080p", "720p", "1440p", "4K", "360p preview"],
       frameRate: ["24 fps", "30 fps", "60 fps", "12 fps"],
       waveform: ["Animated waveform", "Static waveform", "Progress bar", "Cover card"],
+      typography: ["Editorial serif", "Modern sans", "Compact label", "Minimal mono", "No title"],
       color: ["Gold on charcoal", "Emerald on cream", "Monochrome"],
       compression: ["Maximum quality", "High quality", "Balanced", "Small file"],
-      metadata: ["Filename title", "No title"],
+      metadata: ["Embed title tag", "Strip title tag"],
       batchNaming: ["Converted suffix", "Clean filename"]
     },
     requiredCapabilities: ["audio", "canvas", "webcodecs", "worker"],

@@ -9,7 +9,7 @@ type VortexState = "loading" | "ready" | "fallback";
 
 declare global {
   interface Window {
-    __omniVortex?: { frames: number; paused: boolean; state: VortexState };
+    __omniVortex?: { frames: number; paused: boolean; state: VortexState; targetFps: number };
   }
 }
 
@@ -23,8 +23,9 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
     const canvasNode = canvasRef.current;
     if (!canvasNode) return;
     const canvasElement: HTMLCanvasElement = canvasNode;
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const stats = { frames: 0, paused: true, state: "loading" as VortexState };
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let reducedMotion = motionQuery.matches;
+    const stats = { frames: 0, paused: true, state: "loading" as VortexState, targetFps: 0 };
     let disposed = false;
     let teardown = () => {};
     window.__omniVortex = stats;
@@ -103,9 +104,14 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
           render(0);
         }
 
+        function isDropTargetEngaged() {
+          return Boolean(document.querySelector(".drop-core:hover, .drop-core:focus-visible, .drop-core:focus"));
+        }
+
         function tick(now: number) {
           if (disposed || resourcesDisposed || document.hidden || reducedMotion) return;
-          const targetFps = 60;
+          const targetFps = activityRef.current.active || isDropTargetEngaged() ? 60 : 27;
+          stats.targetFps = targetFps;
           const frameInterval = 1000 / targetFps;
           if (now - lastFrame >= frameInterval - 1) {
             lastFrame = now - ((now - lastFrame) % frameInterval);
@@ -126,17 +132,24 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
         function stop() {
           running = false;
           stats.paused = true;
+          stats.targetFps = 0;
           cancelAnimationFrame(frame);
         }
 
         const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
         const onVisibilityChange = () => document.hidden ? stop() : start();
+        const onMotionChange = (event: MediaQueryListEvent) => {
+          reducedMotion = event.matches;
+          if (reducedMotion) stop();
+          else start();
+        };
         const disposeResources = () => {
           if (resourcesDisposed) return;
           resourcesDisposed = true;
           stop();
           observer?.disconnect();
           document.removeEventListener("visibilitychange", onVisibilityChange);
+          motionQuery.removeEventListener("change", onMotionChange);
           canvasElement.removeEventListener("webglcontextlost", onContextLost);
           geometry.dispose();
           material.dispose();
@@ -151,6 +164,7 @@ export function VortexScene({ active, fileLoaded }: VortexSceneProps) {
         teardown = disposeResources;
         observer?.observe(canvasElement);
         document.addEventListener("visibilitychange", onVisibilityChange);
+        motionQuery.addEventListener("change", onMotionChange);
         canvasElement.addEventListener("webglcontextlost", onContextLost);
         resize();
         stats.paused = document.hidden || reducedMotion;

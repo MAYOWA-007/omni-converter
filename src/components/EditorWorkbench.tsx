@@ -21,6 +21,7 @@ const CONTROL_LABELS: Record<string, string> = {
   audioChannels: "Channels",
   bitDepth: "Bit depth",
   waveform: "Waveform",
+  typography: "Typography",
   captions: "Captions",
   color: "Color",
   compression: "Compression",

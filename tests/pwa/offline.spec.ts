@@ -42,7 +42,7 @@ test("first install caches the bounded shell and immediately reopens offline", a
 
   const wrongMimeType = await page.evaluate(async () => {
     await fetch("/omni-converter/not-an-api?user-file=private").catch(() => undefined);
-    await fetch("/omni-converter/assets/favicons/favicon-48x48.png?user-file=probe").catch(() => undefined);
+    await fetch("/omni-converter/favicon-48x48.png?user-file=private").catch(() => undefined);
     await fetch("/omni-converter/assets/ffmpeg/ffmpeg-core.wasm", { headers: { Range: "bytes=0-15" } }).catch(() => undefined);
     const wrongMime = await fetch("/omni-converter/assets/not-real.js");
     const blobUrl = URL.createObjectURL(new Blob(["private file"], { type: "text/plain" }));

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { saveOutput, saveOutputBundle, saveOutputsToFolder } from "../core/export";
 import type { ConversionJob, JobError } from "../core/jobs";
 import type { EngineResult } from "../engines/types";
-import { formatBytes } from "../lib/fileInspection";
+import { formatBytes } from "../lib/formatting";
 import { OutputPreview } from "./OutputPreview";
 
 interface ResultScreenProps {

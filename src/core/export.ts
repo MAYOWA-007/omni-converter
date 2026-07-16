@@ -1,6 +1,5 @@
-import { BlobReader, BlobWriter, ZipWriter } from "@zip.js/zip.js";
 import { normalizeArchivePath } from "./archivePaths";
-import { validateOutput, validateOutputs, type OutputCandidate, type OutputValidation } from "./outputValidation";
+import type { OutputCandidate, OutputValidation } from "./outputValidation";
 import { MAX_ARCHIVE_ENTRY_COUNT } from "./riskLimits";
 
 export const MAX_IN_MEMORY_BUNDLE_BYTES = 64 * 1024 * 1024;
@@ -87,6 +86,7 @@ export function normalizeBundlePath(path: string) {
 
 export async function saveOutput(output: OutputCandidate, options: SaveOutputOptions = {}): Promise<SaveOutputResult> {
   const safeName = sanitizeOutputFilename(output.name);
+  const { validateOutput } = await import("./outputValidation");
   const validation = await validateOutput(output);
   assertValid([validation]);
   const io = resolveIo(options.io);
@@ -114,6 +114,7 @@ export async function saveOutputBundle(outputs: readonly OutputCandidate[], opti
   if (outputs.length > MAX_ARCHIVE_ENTRY_COUNT) {
     throw new Error(`ZIP bundle exceeds the ${MAX_ARCHIVE_ENTRY_COUNT} entry limit.`);
   }
+  const { validateOutput, validateOutputs } = await import("./outputValidation");
   const validation = await validateOutputs(outputs);
   assertValid(validation);
 
@@ -145,6 +146,7 @@ export async function saveOutputBundle(outputs: readonly OutputCandidate[], opti
 export async function saveOutputsToFolder(outputs: readonly OutputCandidate[], options: SaveOutputsToFolderOptions = {}): Promise<SaveOutputsToFolderResult> {
   if (outputs.length === 0) throw new Error("At least one output is required to save a folder.");
   if (outputs.length > MAX_ARCHIVE_ENTRY_COUNT) throw new Error(`Folder export exceeds the ${MAX_ARCHIVE_ENTRY_COUNT} entry limit.`);
+  const { validateOutputs } = await import("./outputValidation");
   const validation = await validateOutputs(outputs);
   assertValid(validation);
   const paths = normalizeUniqueBundlePaths(outputs);
@@ -231,6 +233,7 @@ async function resolveOutputDirectory(root: SaveDirectoryHandle, path: string) {
 }
 
 async function streamZipToWritable(outputs: readonly OutputCandidate[], paths: readonly string[], writable: SaveFileWriter) {
+  const { BlobReader, ZipWriter } = await import("@zip.js/zip.js");
   const stream = new WritableStream<Uint8Array>({
     write: (chunk) => writable.write(chunk),
     close: () => writable.close(),
@@ -257,6 +260,7 @@ async function abortWritable(writable: SaveFileWriter, reason: unknown) {
 }
 
 async function createZipBlob(outputs: readonly OutputCandidate[], paths: readonly string[]) {
+  const { BlobReader, BlobWriter, ZipWriter } = await import("@zip.js/zip.js");
   const writer = new BlobWriter("application/zip");
   const zipWriter = new ZipWriter(writer, { level: 9 });
   for (let index = 0; index < outputs.length; index += 1) {

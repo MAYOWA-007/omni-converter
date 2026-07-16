@@ -74,6 +74,40 @@ test("a cooperative engine can be canceled and never exposes its late output", a
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
 });
 
+test("cooperative cancellation is acknowledged within 250ms", async ({ page }) => {
+  await page.goto("/omni-converter/tests/e2e/harness.html?mode=cancel");
+  await chooseImagePdf(page);
+  const cancelButton = page.getByRole("button", { name: "Cancel" });
+  await expect(cancelButton).toBeVisible();
+  await expect(page.getByTestId("abort-count")).toHaveText("0");
+
+  await page.evaluate(() => {
+    const runtime = window as Window & { __omniCancelStartedAt?: number; __omniCancelAcknowledgedAt?: number };
+    const counter = document.querySelector('[data-testid="abort-count"]');
+    const cancel = document.querySelector<HTMLButtonElement>(".processing-cancel");
+    if (!counter) throw new Error("Cancellation counter is unavailable.");
+    if (!cancel) throw new Error("Cancel button is unavailable.");
+    cancel.addEventListener("click", () => {
+      runtime.__omniCancelStartedAt = performance.now();
+    }, { once: true });
+    const observer = new MutationObserver(() => {
+      if (counter.textContent === "1") {
+        runtime.__omniCancelAcknowledgedAt = performance.now();
+        observer.disconnect();
+      }
+    });
+    observer.observe(counter, { childList: true, characterData: true, subtree: true });
+  });
+
+  await cancelButton.click();
+  await expect.poll(() => page.evaluate(() => (window as Window & { __omniCancelAcknowledgedAt?: number }).__omniCancelAcknowledgedAt ?? 0)).toBeGreaterThan(0);
+  const acknowledgementMs = await page.evaluate(() => {
+    const runtime = window as Window & { __omniCancelStartedAt?: number; __omniCancelAcknowledgedAt?: number };
+    return (runtime.__omniCancelAcknowledgedAt ?? Infinity) - (runtime.__omniCancelStartedAt ?? 0);
+  });
+  expect(acknowledgementMs).toBeLessThanOrEqual(250);
+});
+
 test("a failing engine produces a serialized failure with retry and back actions", async ({ page }) => {
   await page.goto("/omni-converter/tests/e2e/harness.html?mode=fail");
   await chooseImagePdf(page);

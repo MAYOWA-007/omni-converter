@@ -273,9 +273,10 @@ test("audio-to-video emits native WebM and MP4 tracks with real dimensions, dura
     resolution: "360p preview",
     frameRate: "24 fps",
     waveform: "Progress bar",
+    typography: "No title",
     color: "Emerald on cream",
     compression: "High quality",
-    metadata: "No title",
+    metadata: "Strip title tag",
     batchNaming: "Clean filename"
   }));
   const mp4Facts = await page.evaluate((output) => window.__omniMediaHarness.inspectOutputMedia(output.bytes, output.name, output.type), mp4.outputs[0]);

@@ -5,7 +5,7 @@ import { validateOutput } from "../../src/core/outputValidation";
 import { convertRecipe } from "../../src/lib/conversions";
 import { inspectFile } from "../../src/lib/fileInspection";
 import type { ConversionSettings } from "../../src/lib/types";
-import { createMultiSheetXlsxBytes, QUOTED_CSV } from "../fixtures/tabularFixtures";
+import { createMultiSheetXlsxBytes, QUOTED_CSV, structuredInputFixture, type StructuredInputFixtureId } from "../fixtures/tabularFixtures";
 
 async function runTabularRecipe(recipeId: string, overrides: ConversionSettings = {}) {
   const contract = VERIFIED_TABULAR_RECIPE_CONTRACTS.find((entry) => entry.recipeId === recipeId);
@@ -15,6 +15,26 @@ async function runTabularRecipe(recipeId: string, overrides: ConversionSettings 
     ? new File([createMultiSheetXlsxBytes()], "Ledger.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
     : new File([QUOTED_CSV], "quoted-data.csv", { type: "text/csv" });
   const outputs = await convertRecipe(file, await inspectFile(file), recipe, { ...contract.fixtureSettings, ...overrides });
+  return Promise.all(outputs.map(async (output) => {
+    const bytes = [...new Uint8Array(await output.blob.arrayBuffer())];
+    const validation = await validateOutput(output);
+    const text = /^(text\/|application\/(json|x-ndjson))/.test(output.blob.type) ? await output.blob.text() : undefined;
+    return { name: output.name, type: output.blob.type, bytes, text, validation: { valid: validation.valid, detectedFormat: validation.detectedFormat } };
+  }));
+}
+
+async function runStructuredInputFixture(fixtureId: StructuredInputFixtureId, overrides: ConversionSettings = {}) {
+  const recipe = CONVERSION_RECIPES.find((entry) => entry.id === "data-json-csv");
+  if (!recipe) throw new Error("The structured data recipe is unavailable.");
+  const file = structuredInputFixture(fixtureId);
+  const outputs = await convertRecipe(file, await inspectFile(file), recipe, {
+    outputFormat: "JSON objects",
+    headerMode: "First row is headers",
+    dataTypes: "Keep source types",
+    formulaSafety: "Preserve exact text",
+    batchNaming: "Clean filename",
+    ...overrides
+  });
   return Promise.all(outputs.map(async (output) => {
     const bytes = [...new Uint8Array(await output.blob.arrayBuffer())];
     const validation = await validateOutput(output);
@@ -39,9 +59,9 @@ async function unzip(bytes: number[]) {
 
 declare global {
   interface Window {
-    __omniTabularHarness: { runTabularRecipe: typeof runTabularRecipe; unzip: typeof unzip };
+    __omniTabularHarness: { runTabularRecipe: typeof runTabularRecipe; runStructuredInputFixture: typeof runStructuredInputFixture; unzip: typeof unzip };
   }
 }
 
-window.__omniTabularHarness = { runTabularRecipe, unzip };
+window.__omniTabularHarness = { runTabularRecipe, runStructuredInputFixture, unzip };
 document.getElementById("status")!.textContent = "ready";

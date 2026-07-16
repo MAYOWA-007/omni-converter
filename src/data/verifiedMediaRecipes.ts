@@ -101,16 +101,17 @@ export const VERIFIED_MEDIA_RECIPE_CONTRACTS: readonly VerifiedMediaRecipeContra
     batchNaming: "Waveform suffix",
     bundle: "Balanced ZIP"
   }),
-  contract("audio-to-video", ["webm"], ["outputFormat", "trim", "aspectRatio", "resolution", "frameRate", "waveform", "color", "compression", "metadata", "batchNaming"], {
+  contract("audio-to-video", ["webm"], ["outputFormat", "trim", "aspectRatio", "resolution", "frameRate", "waveform", "typography", "color", "compression", "metadata", "batchNaming"], {
     outputFormat: "WebM",
     trim: "Full file",
     aspectRatio: "16:9 widescreen",
     resolution: "360p preview",
     frameRate: "12 fps",
     waveform: "Animated waveform",
+    typography: "Editorial serif",
     color: "Gold on charcoal",
     compression: "Balanced",
-    metadata: "Filename title",
+    metadata: "Embed title tag",
     batchNaming: "Converted suffix"
   }),
   contract("video-to-frames", ["zip"], ["outputFormat", "trim", "frameInterval", "resolution", "compression", "metadata", "batchNaming", "bundle"], {

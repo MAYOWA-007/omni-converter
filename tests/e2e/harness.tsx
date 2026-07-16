@@ -208,4 +208,6 @@ function VideoPreflightHarness() {
   return <main className="app-shell stage-edit"><EditScreen inspection={VIDEO_PREFLIGHT_INSPECTION} recipe={VIDEO_PREFLIGHT_RECIPE} device={VIDEO_PREFLIGHT_DEVICE} preflight={null} onConvert={() => {}} onBack={() => {}} onRestart={() => {}} /></main>;
 }
 
-createRoot(document.getElementById("root")!).render(<Harness />);
+const harnessWindow = window as Window & { __omniHarnessRoot?: ReturnType<typeof createRoot> };
+harnessWindow.__omniHarnessRoot ??= createRoot(document.getElementById("root")!);
+harnessWindow.__omniHarnessRoot.render(<Harness />);

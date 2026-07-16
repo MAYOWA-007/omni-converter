@@ -56,6 +56,7 @@ export type EditorControl =
   | "audioChannels"
   | "bitDepth"
   | "waveform"
+  | "typography"
   | "captions"
   | "color"
   | "compression"
@@ -130,7 +131,7 @@ export interface FileInspection {
   slides?: number;
   archiveEntries?: Array<{ name: string; size: number }>;
   exactFormat?: string;
-  signatureSource?: "signature" | "unknown";
+  signatureSource?: "signature" | "mime" | "extension" | "unknown";
   riskBlocked?: boolean;
   riskReasons?: string[];
   notes: string[];

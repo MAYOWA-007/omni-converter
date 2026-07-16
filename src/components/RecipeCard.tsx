@@ -11,6 +11,8 @@ interface RecipeCardProps {
 export function RecipeCard({ recipe, preflight, selected, onSelect }: RecipeCardProps) {
   const showStatus = preflight?.status === "blocked" || preflight?.status === "slow";
   const Icon = preflight?.status === "blocked" ? OctagonAlert : Gauge;
+  const visibleTreatments = recipe.treatments.slice(0, 2);
+  const hiddenTreatmentCount = recipe.treatments.length - visibleTreatments.length;
 
   return (
     <button className={`recipe-card ${selected ? "is-selected" : ""}`} onClick={onSelect} type="button">
@@ -26,9 +28,10 @@ export function RecipeCard({ recipe, preflight, selected, onSelect }: RecipeCard
       <strong>{recipe.title}</strong>
       <p>{recipe.description}</p>
       <span className="treatment-list">
-        {recipe.treatments.slice(0, 4).map((treatment) => (
+        {visibleTreatments.map((treatment) => (
           <span key={treatment}>{treatment}</span>
         ))}
+        {hiddenTreatmentCount > 0 ? <span aria-label={`${hiddenTreatmentCount} more options`}>+{hiddenTreatmentCount}</span> : null}
       </span>
       <span className="select-hint">Choose</span>
     </button>

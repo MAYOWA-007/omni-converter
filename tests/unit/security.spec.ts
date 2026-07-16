@@ -101,7 +101,7 @@ test("the app shell uses an external prepaint stylesheet and a strict CSP", () =
   const policy = /http-equiv="Content-Security-Policy"\s+content="([^"]+)"/i.exec(html)?.[1] ?? "";
 
   expect(html).not.toMatch(/<style(?:\s|>)/i);
-  expect(html).toContain('href="/omni-converter/prepaint.css"');
+  expect(html).toContain('href="%BASE_URL%prepaint.css"');
   expect(policy).toContain("default-src 'none'");
   expect(policy).toContain("script-src 'self' 'wasm-unsafe-eval'");
   expect(policy).toContain("worker-src 'self' blob:");
@@ -120,7 +120,7 @@ test("the service worker cache policy is versioned and refuses arbitrary request
   expect(worker).toContain("isExplicitStaticRequest");
   expect(worker).toContain("shellMarkup.matchAll");
   expect(worker).toContain("discoverCssAssets");
-  expect(worker).not.toMatch(/OmniDisplay|OmniScript/i);
+  expect(worker).not.toContain("OmniDisplay.woff2");
   expect(worker).not.toMatch(/caches\.match\(\s*(?:event\.)?request\s*\)/);
   expect(worker).not.toContain("skipWaiting();\n});");
 });

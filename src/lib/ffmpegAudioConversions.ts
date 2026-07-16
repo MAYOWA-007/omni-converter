@@ -46,7 +46,27 @@ export async function convertFfmpegAudioRecipe(
   settings: ConversionSettings,
   execution?: LegacyExecutionContext
 ): Promise<ConversionOutput> {
-  const run = () => runFfmpegAudioConversion(file, inspection, recipeId, settings, execution);
+  return enqueueFfmpegJob(() => runFfmpegAudioConversion(file, inspection, recipeId, settings, execution));
+}
+
+export interface FfmpegAudioInspection {
+  duration?: number;
+  sampleRate?: number;
+  audioChannels?: number;
+  audioCodec?: string;
+  containerFormat?: string;
+}
+
+export function inspectFfmpegAudio(file: File, signal?: AbortSignal): Promise<FfmpegAudioInspection> {
+  throwIfAborted(signal);
+  return enqueueFfmpegJob(() => runFfmpegAudioInspection(file, signal));
+}
+
+export function normalizeAudioForBrowser(file: File, execution?: LegacyExecutionContext): Promise<File> {
+  return enqueueFfmpegJob(() => runFfmpegAudioNormalization(file, execution));
+}
+
+function enqueueFfmpegJob<T>(run: () => Promise<T>) {
   const job = jobTail.then(run, run);
   jobTail = job.then(() => undefined, () => undefined);
   return job;
@@ -111,6 +131,120 @@ async function runFfmpegAudioConversion(
       name: `${baseFileName(file.name, "converted-audio")}${suffix}.${spec.extension}`,
       blob: new Blob([bytes], { type: spec.mime })
     };
+  } catch (error) {
+    if (aborted || execution?.signal.aborted) throw new DOMException("Conversion was cancelled.", "AbortError");
+    throw error;
+  } finally {
+    ffmpeg.off("progress", progress);
+    ffmpeg.off("log", log);
+    execution?.signal.removeEventListener("abort", abort);
+    if (!aborted) {
+      await Promise.all([
+        ffmpeg.deleteFile(inputName).catch(() => undefined),
+        ffmpeg.deleteFile(outputName).catch(() => undefined)
+      ]);
+    }
+  }
+}
+
+async function runFfmpegAudioInspection(file: File, signal?: AbortSignal): Promise<FfmpegAudioInspection> {
+  throwIfAborted(signal);
+  const id = `${Date.now().toString(36)}-${(++jobCounter).toString(36)}`;
+  const sourceExtension = file.name.match(/\.([a-z0-9]{1,10})$/i)?.[1]?.toLowerCase() ?? "bin";
+  const inputName = `probe-input-${id}.${sourceExtension}`;
+  const ffmpeg = await getFfmpeg();
+  throwIfAborted(signal);
+  let aborted = false;
+  const logs: string[] = [];
+  const log = ({ message }: { message: string }) => logs.push(message);
+  const abort = () => {
+    aborted = true;
+    ffmpeg.terminate();
+    ffmpegPromise = undefined;
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  ffmpeg.on("log", log);
+  try {
+    await ffmpeg.writeFile(inputName, new Uint8Array(await file.arrayBuffer()));
+    const exitCode = await ffmpeg.exec([
+      "-nostdin",
+      "-hide_banner",
+      "-loglevel",
+      "info",
+      "-i",
+      inputName,
+      "-map",
+      "0:a:0",
+      "-frames:a",
+      "1",
+      "-f",
+      "null",
+      "-"
+    ], 60_000, { signal });
+    if (exitCode !== 0) throw new Error(`Audio inspection failed with code ${exitCode}.`);
+    return parseFfmpegAudioInspection(logs);
+  } catch (error) {
+    if (aborted || signal?.aborted) throw new DOMException("Inspection was cancelled.", "AbortError");
+    throw error;
+  } finally {
+    ffmpeg.off("log", log);
+    signal?.removeEventListener("abort", abort);
+    if (!aborted) await ffmpeg.deleteFile(inputName).catch(() => undefined);
+  }
+}
+
+async function runFfmpegAudioNormalization(file: File, execution?: LegacyExecutionContext): Promise<File> {
+  throwIfAborted(execution?.signal);
+  const id = `${Date.now().toString(36)}-${(++jobCounter).toString(36)}`;
+  const sourceExtension = file.name.match(/\.([a-z0-9]{1,10})$/i)?.[1]?.toLowerCase() ?? "bin";
+  const inputName = `decode-input-${id}.${sourceExtension}`;
+  const outputName = `decode-output-${id}.wav`;
+  const ffmpeg = await getFfmpeg();
+  let aborted = false;
+  const logs: string[] = [];
+  const abort = () => {
+    aborted = true;
+    ffmpeg.terminate();
+    ffmpegPromise = undefined;
+  };
+  const progress = ({ progress: value }: { progress: number }) => {
+    execution?.reportProgress({ completed: 4 + Math.max(0, Math.min(1, value)) * 20, total: 100, label: "Preparing the source audio" });
+  };
+  const log = ({ message }: { message: string }) => {
+    logs.push(message);
+    if (logs.length > 8) logs.shift();
+  };
+
+  execution?.signal.addEventListener("abort", abort, { once: true });
+  ffmpeg.on("progress", progress);
+  ffmpeg.on("log", log);
+  try {
+    execution?.reportProgress({ completed: 2, total: 100, label: "Loading the audio compatibility engine" });
+    await ffmpeg.writeFile(inputName, new Uint8Array(await file.arrayBuffer()));
+    throwIfAborted(execution?.signal);
+    const exitCode = await ffmpeg.exec([
+      "-nostdin",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      inputName,
+      "-map",
+      "0:a:0",
+      "-vn",
+      "-c:a",
+      "pcm_s16le",
+      "-f",
+      "wav",
+      outputName
+    ], 180_000, { signal: execution?.signal });
+    if (exitCode !== 0) throw new Error(`Audio decoding failed with code ${exitCode}${logs.length ? `: ${logs.join(" ")}` : "."}`);
+    const data = await ffmpeg.readFile(outputName);
+    if (typeof data === "string") throw new Error("Audio decoding returned text instead of WAV bytes.");
+    const bytes = Uint8Array.from(data);
+    if (bytes.length <= 44) throw new Error("Audio decoding produced no usable samples.");
+    return new File([bytes], `${baseFileName(file.name, "decoded-audio")}.wav`, { type: "audio/wav" });
   } catch (error) {
     if (aborted || execution?.signal.aborted) throw new DOMException("Conversion was cancelled.", "AbortError");
     throw error;
@@ -253,6 +387,31 @@ function losslessCompressionLevel(value?: string) {
 
 function preciseNumber(value: number) {
   return String(Math.round(value * 1000) / 1000);
+}
+
+function parseFfmpegAudioInspection(logs: readonly string[]): FfmpegAudioInspection {
+  const text = logs.join("\n");
+  const containerMatch = /Input #0,\s*(.+?),\s*from\s/i.exec(text);
+  const durationMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(text);
+  const audioLine = text.split(/\r?\n/).find((line) => /Stream #.*Audio:/i.test(line));
+  const streamMatch = audioLine && /Audio:\s*([^,]+),\s*(\d+)\s*Hz,\s*([^,]+)/i.exec(audioLine);
+  const duration = durationMatch
+    ? Number(durationMatch[1]) * 3600 + Number(durationMatch[2]) * 60 + Number(durationMatch[3])
+    : undefined;
+  const channelLabel = streamMatch?.[3]?.trim().toLowerCase();
+  const audioChannels = channelLabel === "mono" ? 1
+    : channelLabel === "stereo" ? 2
+      : channelLabel?.match(/^(\d+)\.(\d+)/) ? Number(channelLabel.match(/^(\d+)\.(\d+)/)?.[1]) + Number(channelLabel.match(/^(\d+)\.(\d+)/)?.[2])
+        : channelLabel?.match(/^\d+$/) ? Number(channelLabel)
+          : undefined;
+  if (!streamMatch) throw new Error("FFmpeg found no readable audio stream.");
+  return {
+    duration: Number.isFinite(duration) && duration! > 0 ? duration : undefined,
+    sampleRate: Number(streamMatch[2]),
+    audioChannels,
+    audioCodec: streamMatch[1].trim(),
+    containerFormat: containerMatch?.[1].trim()
+  };
 }
 
 function throwIfAborted(signal?: AbortSignal) {
