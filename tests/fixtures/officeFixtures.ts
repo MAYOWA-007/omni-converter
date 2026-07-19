@@ -1,6 +1,8 @@
 import { strToU8, zipSync } from "fflate";
 
 const PNG = Uint8Array.from(atobBytes("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="));
+const MP3 = Uint8Array.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+const MP4 = Uint8Array.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x00, 0x00, 0x69, 0x73, 0x6f, 0x6d, 0x6d, 0x70, 0x34, 0x32]);
 
 export function createSemanticDocxBytes() {
   return zipSync({
@@ -28,7 +30,7 @@ export function createSemanticDocxBytes() {
 
 export function createNotesPptxBytes() {
   return zipSync({
-    "[Content_Types].xml": xml(`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/notesSlides/notesSlide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/><Override PartName="/ppt/notesSlides/notesSlide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/></Types>`),
+    "[Content_Types].xml": xml(`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="mp3" ContentType="audio/mpeg"/><Default Extension="mp4" ContentType="video/mp4"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/notesSlides/notesSlide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/><Override PartName="/ppt/notesSlides/notesSlide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/></Types>`),
     "_rels/.rels": relationships([{ id: "rId1", type: "officeDocument", target: "ppt/presentation.xml" }]),
     "ppt/presentation.xml": xml(`<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId2"/><p:sldId id="257" r:id="rId1"/></p:sldIdLst></p:presentation>`),
     "ppt/_rels/presentation.xml.rels": relationships([
@@ -37,11 +39,13 @@ export function createNotesPptxBytes() {
     ]),
     "ppt/slides/slide1.xml": slide("Details", "Second in declared order"),
     "ppt/slides/slide2.xml": slide("Opening", "First in declared order"),
-    "ppt/slides/_rels/slide1.xml.rels": relationships([{ id: "rIdNotes", type: "notesSlide", target: "../notesSlides/notesSlide1.xml" }]),
-    "ppt/slides/_rels/slide2.xml.rels": relationships([{ id: "rIdNotes", type: "notesSlide", target: "../notesSlides/notesSlide2.xml" }]),
+    "ppt/slides/_rels/slide1.xml.rels": relationships([{ id: "rIdNotes", type: "notesSlide", target: "../notesSlides/notesSlide1.xml" }, { id: "rIdVideo", type: "video", target: "../media/demo.mp4" }]),
+    "ppt/slides/_rels/slide2.xml.rels": relationships([{ id: "rIdNotes", type: "notesSlide", target: "../notesSlides/notesSlide2.xml" }, { id: "rIdImage", type: "image", target: "../media/logo.png" }, { id: "rIdAudio", type: "audio", target: "../media/narration.mp3" }]),
     "ppt/notesSlides/notesSlide1.xml": notes("Explain the numbers"),
     "ppt/notesSlides/notesSlide2.xml": notes("Welcome the room"),
-    "ppt/media/logo.png": PNG
+    "ppt/media/logo.png": PNG,
+    "ppt/media/narration.mp3": MP3,
+    "ppt/media/demo.mp4": MP4
   }, { level: 6 });
 }
 

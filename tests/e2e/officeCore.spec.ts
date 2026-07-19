@@ -78,10 +78,22 @@ test("PPTX text export applies format, slide selection, detail, and naming contr
   expect(text.text).not.toContain("Speaker notes:");
 });
 
-test("PPTX media extraction is truthful and never claims visual slide rendering", async ({ page }) => {
+test("PPTX media extraction separates images, audio, video, and the complete package", async ({ page }) => {
+  for (const expectation of [
+    { recipeId: "presentation-images", name: "Launch-Brief-images.zip", entries: ["images/logo.png", "manifest.json"], assetKind: "image" },
+    { recipeId: "presentation-audio", name: "Launch-Brief-audio.zip", entries: ["audio/narration.mp3", "manifest.json"], assetKind: "audio" },
+    { recipeId: "presentation-video", name: "Launch-Brief-video.zip", entries: ["video/demo.mp4", "manifest.json"], assetKind: "video" }
+  ]) {
+    const [filtered] = await page.evaluate((recipeId) => window.__omniOfficeHarness.runOfficeRecipe(recipeId, { bundle: "Store ZIP" }), expectation.recipeId);
+    const filteredEntries = await page.evaluate((bytes) => window.__omniOfficeHarness.unzip(bytes), filtered.bytes);
+    expect(filtered.name).toBe(expectation.name);
+    expect(filteredEntries.map((entry) => entry.name)).toEqual(expectation.entries);
+    expect(JSON.parse(filteredEntries[1].text)).toMatchObject({ assetKind: expectation.assetKind, assets: [{ sourcePath: expect.stringContaining(`.${expectation.entries[0].split(".").pop()}`) }] });
+  }
+
   const [output] = await page.evaluate(() => window.__omniOfficeHarness.runOfficeRecipe("presentation-assets", { bundle: "Store ZIP" }));
   const entries = await page.evaluate((bytes) => window.__omniOfficeHarness.unzip(bytes), output.bytes);
   expect(output.name).toBe("Launch-Brief-assets.zip");
-  expect(entries.map((entry) => entry.name)).toEqual(["assets/logo.png", "manifest.json"]);
+  expect(entries.map((entry) => entry.name)).toEqual(["assets/logo.png", "assets/narration.mp3", "assets/demo.mp4", "manifest.json"]);
   expect(entries.every((entry) => entry.compressionMethod === 0)).toBe(true);
 });

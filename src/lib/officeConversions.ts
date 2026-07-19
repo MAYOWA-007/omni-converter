@@ -6,6 +6,13 @@ import type { ConversionSettings } from "./types";
 
 const MAX_OFFICE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024;
 const RELATIONSHIPS_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+type PresentationAssetKind = "all" | "image" | "audio" | "video";
+
+const PRESENTATION_ASSET_EXTENSIONS: Record<Exclude<PresentationAssetKind, "all">, ReadonlySet<string>> = {
+  image: new Set(["apng", "avif", "bmp", "dib", "emf", "gif", "heic", "heif", "jfif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp", "wmf"]),
+  audio: new Set(["aac", "ac3", "aif", "aiff", "amr", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "wma"]),
+  video: new Set(["3gp", "avi", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ogv", "webm", "wmv"])
+};
 
 export interface PresentationSlide {
   number: number;
@@ -33,27 +40,43 @@ export async function convertDocxToHtml(file: File, baseName: string, settings: 
   return htmlOutput(`${baseName}${suffix}.html`, file.name, body);
 }
 
-export async function extractOfficeAssets(file: File, baseName: string, family: "document" | "presentation", settings: ConversionSettings): Promise<ConversionOutput> {
+export async function extractOfficeAssets(file: File, baseName: string, family: "document" | "presentation", settings: ConversionSettings, assetKind: PresentationAssetKind = "all"): Promise<ConversionOutput> {
   const prefix = family === "document" ? "word/media/" : "ppt/media/";
   const packageRoot = family === "document" ? "word/document.xml" : "ppt/presentation.xml";
   return withSafeZip(file, async (archive) => {
     assertOfficeArchive(archive, packageRoot);
-    const assets = archive.entries.filter((entry) => entry.name.toLowerCase().startsWith(prefix));
-    if (!assets.length) throw new Error("This Office package contains no embedded media assets.");
+    const packageAssets = archive.entries.filter((entry) => entry.name.toLowerCase().startsWith(prefix));
+    const assets = family === "presentation" && assetKind !== "all"
+      ? packageAssets.filter((entry) => presentationAssetKind(entry.name) === assetKind)
+      : packageAssets;
+    if (!assets.length) {
+      const qualifier = family === "presentation" && assetKind !== "all" ? `${assetKind} ` : "";
+      throw new Error(`This Office package contains no embedded ${qualifier}assets.`);
+    }
+    const outputDirectory = family === "presentation" && assetKind !== "all" ? assetKind === "image" ? "images" : assetKind : "assets";
     const outputs: ConversionOutput[] = [];
     for (const asset of assets) {
-      outputs.push({ name: `assets/${asset.name.slice(prefix.length)}`, blob: await asset.blob(mimeForName(asset.name)) });
+      outputs.push({ name: `${outputDirectory}/${asset.name.slice(prefix.length)}`, blob: await asset.blob(mimeForName(asset.name)) });
     }
     if (settings.metadata !== "Assets only") {
       outputs.push(jsonOutput("manifest.json", {
         source: file.name,
         family,
+        ...(family === "presentation" ? { assetKind } : {}),
         assets: assets.map((asset, index) => ({ sourcePath: asset.name, output: outputs[index].name, bytes: asset.uncompressedSize }))
       }));
     }
-    const suffix = settings.batchNaming === "Clean filename" ? "" : "-assets";
+    const suffix = settings.batchNaming === "Clean filename" ? "" : assetKind === "all" ? "-assets" : assetKind === "image" ? "-images" : `-${assetKind}`;
     return zipOutputs(`${baseName}${suffix}.zip`, outputs, zipLevelFromCompression(settings.bundle));
   });
+}
+
+function presentationAssetKind(name: string): Exclude<PresentationAssetKind, "all"> | null {
+  const extension = name.split(".").pop()?.toLowerCase() ?? "";
+  for (const kind of ["image", "audio", "video"] as const) {
+    if (PRESENTATION_ASSET_EXTENSIONS[kind].has(extension)) return kind;
+  }
+  return null;
 }
 
 export async function convertPptxText(file: File, baseName: string, settings: ConversionSettings): Promise<ConversionOutput> {
@@ -284,5 +307,5 @@ function jsonOutput(name: string, value: unknown): ConversionOutput {
 
 function mimeForName(name: string) {
   const extension = name.split(".").pop()?.toLowerCase();
-  return ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", svg: "image/svg+xml", webp: "image/webp", mp3: "audio/mpeg", wav: "audio/wav", mp4: "video/mp4" } as Record<string, string>)[extension ?? ""] ?? "application/octet-stream";
+  return ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", svg: "image/svg+xml", webp: "image/webp", mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac", oga: "audio/ogg", ogg: "audio/ogg", opus: "audio/ogg", mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime", webm: "video/webm" } as Record<string, string>)[extension ?? ""] ?? "application/octet-stream";
 }

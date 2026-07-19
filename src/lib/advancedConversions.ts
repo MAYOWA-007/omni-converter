@@ -43,6 +43,9 @@ const ADVANCED_RECIPE_IDS = new Set([
   "document-to-markdown",
   "document-to-html",
   "document-assets",
+  "presentation-images",
+  "presentation-audio",
+  "presentation-video",
   "presentation-assets",
   "presentation-notes",
   "archive-inspect",
@@ -116,6 +119,12 @@ async function convertAdvancedRecipeImpl(file: File, _inspection: FileInspection
       return [await convertDocxToHtml(file, baseName, settings)];
     case "document-assets":
       return [await extractOfficeAssets(file, baseName, "document", settings)];
+    case "presentation-images":
+      return [await extractOfficeAssets(file, baseName, "presentation", settings, "image")];
+    case "presentation-audio":
+      return [await extractOfficeAssets(file, baseName, "presentation", settings, "audio")];
+    case "presentation-video":
+      return [await extractOfficeAssets(file, baseName, "presentation", settings, "video")];
     case "presentation-assets":
       return [await extractOfficeAssets(file, baseName, "presentation", settings)];
     case "presentation-notes":

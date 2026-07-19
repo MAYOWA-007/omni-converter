@@ -104,6 +104,7 @@ test("the app shell uses an external prepaint stylesheet and a strict CSP", () =
   expect(html).toContain('href="%BASE_URL%prepaint.css"');
   expect(policy).toContain("default-src 'none'");
   expect(policy).toContain("script-src 'self' 'wasm-unsafe-eval'");
+  expect(policy).toContain("connect-src 'self' data: blob:");
   expect(policy).toContain("worker-src 'self' blob:");
   expect(policy).toContain("base-uri 'none'");
   expect(policy).not.toContain("'unsafe-inline'");

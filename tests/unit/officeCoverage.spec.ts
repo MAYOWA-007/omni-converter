@@ -11,7 +11,7 @@ test("every verified Office recipe has one executable fixture contract", () => {
   }
 });
 
-test("fake visual rendering and legacy binary Office formats remain unavailable", () => {
+test("full-fidelity visual rendering and legacy binary Office formats remain unavailable", () => {
   expect(VERIFIED_OFFICE_RECIPE_IDS.has("presentation-slide-images")).toBe(false);
   expect(CONVERSION_RECIPES.find((recipe) => recipe.id === "presentation-slide-images")).toMatchObject({ implementation: "planned", runtimes: [] });
   for (const id of VERIFIED_OFFICE_RECIPE_IDS) {
