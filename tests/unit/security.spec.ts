@@ -111,6 +111,13 @@ test("the app shell uses an external prepaint stylesheet and a strict CSP", () =
   expect(policy).not.toContain("'unsafe-eval'");
 });
 
+test("the decorative promise font cannot trigger a late content swap", () => {
+  const styles = readFileSync(resolve("src/styles.css"), "utf8");
+  const scriptFace = /@font-face\s*\{[^}]*font-family:\s*"Omni Script";[^}]*\}/s.exec(styles)?.[0] ?? "";
+
+  expect(scriptFace).toContain("font-display: optional");
+});
+
 test("the service worker cache policy is versioned and refuses arbitrary requests", () => {
   const worker = readFileSync(resolve("public/sw.js"), "utf8");
 

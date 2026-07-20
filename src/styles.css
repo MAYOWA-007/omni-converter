@@ -1064,7 +1064,7 @@ a {
 @font-face {
   font-family: "Omni Script";
   src: url("/omni-converter/assets/fonts/OmniScript.woff2") format("woff2");
-  font-display: swap;
+  font-display: optional;
 }
 
 .processing-screen,
