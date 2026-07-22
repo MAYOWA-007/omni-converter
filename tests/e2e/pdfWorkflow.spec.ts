@@ -14,7 +14,7 @@ test("PDF upload exposes the verified catalog, searchable outputs, dynamic pages
     buffer: Buffer.from(bytes)
   });
 
-  await expect(page.getByText("24 available conversions")).toBeVisible();
+  await expect(page.getByText("25 available conversions")).toBeVisible();
   await expect(page.getByText("4 pages")).toBeVisible();
   await page.getByLabel("Search conversions").fill("rotate");
   await expect(page.getByRole("button", { name: "Rotate PDF pages" })).toBeVisible();

@@ -6,7 +6,7 @@ test("valid video exposes verified operations and corrupt video falls back to un
   await page.goto("/");
   const video = readFileSync(resolve("tests/fixtures/video-tone.webm"));
   await page.locator('input[type="file"]').setInputFiles({ name: "Video Tone.webm", mimeType: "video/webm", buffer: video });
-  await expect(page.getByText("14 available conversions")).toBeVisible();
+  await expect(page.getByText("15 available conversions")).toBeVisible();
   for (const title of ["Video to image frames", "Video thumbnail contact sheet", "Video to MP4", "Video to WebM", "Video to audio file"]) {
     await expect(page.locator(".recipe-card").filter({ has: page.getByText(title, { exact: true }) })).toBeVisible();
   }

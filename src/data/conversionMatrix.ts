@@ -8,6 +8,7 @@ import { VERIFIED_ARCHIVE_RECIPE_IDS } from "./verifiedArchiveRecipes";
 import { VERIFIED_EBOOK_RECIPE_IDS } from "./verifiedEbookRecipes";
 import { VERIFIED_MEDIA_RECIPE_IDS } from "./verifiedMediaRecipes";
 import { VERIFIED_UNIVERSAL_RECIPE_IDS } from "./verifiedUniversalRecipes";
+import { VERIFIED_FONT_RECIPE_IDS } from "./verifiedFontRecipes";
 
 export const FAMILY_LABELS: Record<FileFamily, string> = {
   image: "Image",
@@ -77,7 +78,7 @@ export const UNIVERSAL_TREATMENTS = [
   "Estimate processing time"
 ];
 
-const VERIFIED_BROWSER_RECIPE_IDS = new Set([...VERIFIED_IMAGE_RECIPE_IDS, ...VERIFIED_PDF_RECIPE_IDS, ...VERIFIED_TABULAR_RECIPE_IDS, ...VERIFIED_OFFICE_RECIPE_IDS, ...VERIFIED_ARCHIVE_RECIPE_IDS, ...VERIFIED_EBOOK_RECIPE_IDS, ...VERIFIED_MEDIA_RECIPE_IDS, ...VERIFIED_UNIVERSAL_RECIPE_IDS]);
+const VERIFIED_BROWSER_RECIPE_IDS = new Set([...VERIFIED_IMAGE_RECIPE_IDS, ...VERIFIED_PDF_RECIPE_IDS, ...VERIFIED_TABULAR_RECIPE_IDS, ...VERIFIED_OFFICE_RECIPE_IDS, ...VERIFIED_ARCHIVE_RECIPE_IDS, ...VERIFIED_EBOOK_RECIPE_IDS, ...VERIFIED_MEDIA_RECIPE_IDS, ...VERIFIED_UNIVERSAL_RECIPE_IDS, ...VERIFIED_FONT_RECIPE_IDS]);
 
 type RecipeInput = Omit<ConversionRecipe, "implementation" | "localOnly" | "maturity" | "runtimes"> & Partial<Pick<ConversionRecipe, "implementation">>;
 
@@ -167,6 +168,7 @@ const AUDIO_CHANNEL_OPTIONS = ["Source channels", "Mono", "Stereo"];
 const AUDIO_BITRATE_OPTIONS = ["320 kbps", "256 kbps", "192 kbps", "160 kbps", "128 kbps", "96 kbps", "64 kbps"];
 const AUDIO_METADATA_OPTIONS = ["Keep tags", "Strip tags"];
 const AUDIO_NAMING_OPTIONS = ["Converted suffix", "Clean filename"];
+const FONT_INPUT_FORMATS = ["ttf", "otf", "woff", "woff2"];
 const LOSSY_AUDIO_OPTIONS = options({
   trim: MEDIA_TRIM_OPTIONS,
   sampleRate: AUDIO_SAMPLE_RATE_OPTIONS,
@@ -772,11 +774,18 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
     input: ["pdf"],
     category: "Asset extraction",
     output: "Image ZIP",
-    title: "Extract images from PDF",
-    description: "Extract embedded images when the PDF structure exposes them.",
-    treatments: ["Images", "Manifest", "ZIP"],
-    keywords: ["extract", "images", "assets", "pdf", "zip"],
+    title: "PDF images and page renders",
+    description: "Extract exposed embedded images and render a PNG fallback for selected pages without extractable image objects.",
+    treatments: ["Embedded images", "Page render fallback", "Manifest", "ZIP"],
+    keywords: ["extract", "images", "assets", "render pages", "pdf", "zip"],
     editorControls: ["pageOrder", "resolution", "metadata", "batchNaming", "bundle"],
+    controlOptions: {
+      pageOrder: [...PDF_PAGE_SELECTION_OPTIONS],
+      resolution: ["96 DPI", "150 DPI", "200 DPI", "300 DPI"],
+      metadata: ["Include manifest", "Assets only"],
+      batchNaming: ["Assets suffix", "Clean filename"],
+      bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"]
+    },
     requiredCapabilities: ["pdf", "worker", "zip"],
     intensity: "heavy",
     engine: "PDF object parser"
@@ -872,12 +881,19 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "video-to-gif",
     input: ["video"],
+    inputFormats: VIDEO_INPUT_FORMATS,
     category: "Motion",
     output: "GIF",
     title: "Video to GIF",
-    description: "Trim a short section and export a looping GIF.",
+    description: "Trim a short section and export a palette-optimized looping GIF at a controlled width and frame rate.",
     treatments: ["GIF", "Loop", "Trim", "Palette"],
-    editorControls: ["timeline", "trim", "aspectRatio", "resolution", "frameRate", "compression", "batchNaming"],
+    keywords: ["video", "gif", "animated image", "loop", "trim", "meme"],
+    editorControls: ["trim", "resolution", "frameRate"],
+    controlOptions: {
+      trim: MEDIA_TRIM_OPTIONS,
+      resolution: ["360 px wide", "480 px wide", "720 px wide"],
+      frameRate: ["8 fps", "12 fps", "15 fps"]
+    },
     requiredCapabilities: ["video", "canvas", "wasm", "worker"],
     intensity: "heavy",
     engine: "FFmpeg WASM"
@@ -1440,13 +1456,18 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "spreadsheet-chart-pack",
     input: ["spreadsheet", "data"],
+    inputFormats: ["xlsx", "csv", "tsv"],
     category: "Report",
     output: "Chart ZIP",
-    title: "Spreadsheet to chart images",
-    description: "Generate bar, line, pie, and summary chart images from selected columns.",
-    treatments: ["Charts", "PNG/SVG", "ZIP"],
-    editorControls: ["outputFormat", "pageSize", "color", "metadata", "batchNaming", "bundle"],
-    controlOptions: { outputFormat: ["PNG charts", "SVG charts", "PNG + SVG ZIP"], pageSize: ["16:9 slide", "Letter report", "Square card"] },
+    title: "Spreadsheet to bar chart pack",
+    description: "Generate one numeric bar chart per usable column as PNG, SVG, or both, with a source manifest.",
+    treatments: ["Bar charts", "PNG", "SVG", "Manifest", "ZIP"],
+    keywords: ["spreadsheet", "xlsx", "csv", "tsv", "bar chart", "chart images", "report", "zip"],
+    editorControls: ["outputFormat", "bundle"],
+    controlOptions: {
+      outputFormat: ["PNG + SVG", "PNG only", "SVG only"],
+      bundle: ["Store ZIP", "Balanced ZIP", "Maximum ZIP"]
+    },
     requiredCapabilities: ["spreadsheet", "canvas", "worker", "zip"],
     intensity: "standard",
     engine: "read-excel-file + Canvas/SVG charts"
@@ -1661,27 +1682,30 @@ export const CONVERSION_RECIPES: ConversionRecipe[] = [
   recipe({
     id: "font-web-pack",
     input: ["font"],
+    inputFormats: FONT_INPUT_FORMATS,
     category: "Font",
     output: "Web font ZIP",
-    title: "Font to web font kit",
-    description: "Package font files, CSS, specimen page, and usage notes.",
-    treatments: ["WOFF", "WOFF2", "CSS", "Specimen"],
-    editorControls: ["outputFormat", "pageSize", "color", "metadata", "batchNaming", "bundle"],
-    controlOptions: { outputFormat: ["WOFF2 + CSS", "WOFF + CSS", "Specimen only", "Full web kit"] },
-    requiredCapabilities: ["canvas", "worker", "zip"],
+    title: "Package font as a web kit",
+    description: "Preserve a browser-compatible font and package it with matching @font-face CSS, a specimen page, and usage notes.",
+    treatments: ["Original font", "CSS", "HTML specimen", "ZIP"],
+    keywords: ["font", "ttf", "otf", "woff", "woff2", "web font", "css", "specimen", "zip"],
+    editorControls: [],
+    requiredCapabilities: ["worker", "zip"],
     intensity: "standard",
-    engine: "FontFace API + font parser"
+    engine: "Native font preservation + zip.js"
   }),
   recipe({
     id: "font-specimen",
     input: ["font"],
+    inputFormats: FONT_INPUT_FORMATS,
     category: "Font",
-    output: "PDF / PNG",
+    output: "PDF or PNG",
     title: "Font specimen sheet",
-    description: "Create a glyph sheet and type specimen card.",
-    treatments: ["Glyph sheet", "PDF", "PNG"],
-    editorControls: ["outputFormat", "pageSize", "color", "metadata", "batchNaming", "bundle"],
-    controlOptions: { outputFormat: ["PDF", "PNG", "SVG", "ZIP all"] },
+    description: "Load the font in the browser and render a portable alphabet, numeral, and sample-text specimen.",
+    treatments: ["Alphabet", "Numerals", "Sample text", "PDF", "PNG"],
+    keywords: ["font", "ttf", "otf", "woff", "woff2", "specimen", "preview", "pdf", "png"],
+    editorControls: ["outputFormat"],
+    controlOptions: { outputFormat: ["PDF", "PNG"] },
     requiredCapabilities: ["canvas", "pdf", "worker"],
     intensity: "standard",
     engine: "FontFace API + Canvas + pdf-lib"

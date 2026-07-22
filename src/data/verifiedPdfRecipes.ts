@@ -24,6 +24,7 @@ export const VERIFIED_PDF_RECIPE_CONTRACTS: readonly VerifiedPdfRecipeContract[]
   contract("pdf-pptx-outline", "legacy-advanced", ["pptx"], ["pageOrder", "metadata", "batchNaming", "bundle"], { pageOrder: "Even pages", metadata: "Include source note", batchNaming: "Outline suffix", bundle: "Maximum compression" }),
   contract("pdf-carousel-images", "legacy-advanced", ["zip"], ["pageOrder", "aspectRatio", "resolution", "crop", "batchNaming", "bundle"], { pageOrder: "First 2 pages", aspectRatio: "1:1 square", resolution: "1080 px wide", crop: "Fill target", batchNaming: "Page number only", bundle: "Balanced ZIP with manifest" }),
   contract("pdf-handout-pdf", "legacy-advanced", ["pdf"], ["pageOrder", "pageLayout", "pageSize", "margins", "metadata", "batchNaming"], { pageOrder: "All pages", pageLayout: "2 pages per sheet", pageSize: "A4", margins: "Narrow", metadata: "Keep document details", batchNaming: "Handout suffix" }),
+  contract("pdf-extract-images", "legacy-advanced", ["zip"], ["pageOrder", "resolution", "metadata", "batchNaming", "bundle"], { pageOrder: "Odd pages", resolution: "96 DPI", metadata: "Include manifest", batchNaming: "Assets suffix", bundle: "Balanced ZIP" }),
   contract("pdf-compress", "legacy-advanced", ["pdf"], ["compression", "metadata", "batchNaming"], { compression: "Smallest visual flattening (96 DPI)", metadata: "Strip document details", batchNaming: "Optimized suffix" })
 ];
 

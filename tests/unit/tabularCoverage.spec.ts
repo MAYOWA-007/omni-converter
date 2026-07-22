@@ -11,9 +11,12 @@ test("every verified browser table recipe has one executable fixture contract", 
   }
 });
 
-test("unparsed and misleading table routes stay unavailable", () => {
+test("table routes are limited to parsed inputs and truthful outputs", () => {
   const dataRecipe = CONVERSION_RECIPES.find((recipe) => recipe.id === "data-json-csv")!;
+  const chartRecipe = CONVERSION_RECIPES.find((recipe) => recipe.id === "spreadsheet-chart-pack")!;
   expect(dataRecipe.controlOptions?.outputFormat).not.toEqual(expect.arrayContaining(["XML", "YAML"]));
   expect(dataRecipe.inputFormats).not.toEqual(expect.arrayContaining(["xml", "yaml", "yml"]));
-  expect(VERIFIED_TABULAR_RECIPE_IDS.has("spreadsheet-chart-pack")).toBe(false);
+  expect(VERIFIED_TABULAR_RECIPE_IDS.has("spreadsheet-chart-pack")).toBe(true);
+  expect(chartRecipe.inputFormats).toEqual(["xlsx", "csv", "tsv"]);
+  expect(chartRecipe.description).not.toMatch(/line|pie/i);
 });

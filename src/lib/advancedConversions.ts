@@ -1,6 +1,5 @@
 import { sanitizeGeneratedHtml } from "../core/sanitize";
 import {
-  audioBitrateFromCompression,
   baseFileName,
   canvasToBlob,
   coverRect,
@@ -17,6 +16,7 @@ import {
   type ConversionOutput
 } from "./conversionHelpers";
 import { selectPdfPageNumbers } from "./pdfPageSelection";
+import { resolveMediaTrimRange } from "./mediaTrim";
 import { convertSpreadsheetToDelimited, convertSpreadsheetToJson, convertStructuredData } from "./dataConversions";
 import { convertDocxToHtml, convertDocxToMarkdown, convertPptxText, extractOfficeAssets } from "./officeConversions";
 import { compressApplicationPackage as compressApplicationToZip, createExtractedZip, inspectZipArchive, repackZipArchive } from "./archiveConversions";
@@ -79,7 +79,7 @@ function throwIfAborted(signal?: AbortSignal) {
   }
 }
 
-async function convertAdvancedRecipeImpl(file: File, _inspection: FileInspection, recipe: ConversionRecipe, settings: ConversionSettings = {}): Promise<ConversionOutput[]> {
+async function convertAdvancedRecipeImpl(file: File, inspection: FileInspection, recipe: ConversionRecipe, settings: ConversionSettings = {}): Promise<ConversionOutput[]> {
   const baseName = baseFileName(file.name, "converted-file");
 
   switch (recipe.id) {
@@ -104,7 +104,7 @@ async function convertAdvancedRecipeImpl(file: File, _inspection: FileInspection
     case "pdf-compress":
       return [await compressPdf(file, baseName, settings)];
     case "video-to-gif":
-      return [await transcodeWithFfmpeg(file, baseName, "gif", settings)];
+      return [await transcodeVideoToGif(file, inspection, baseName, settings)];
     case "spreadsheet-to-csv":
       return [await convertSpreadsheetToDelimited(file, baseName, settings)];
     case "spreadsheet-to-json":
@@ -296,8 +296,9 @@ async function createPdfHandout(file: File, baseName: string, settings: Conversi
 async function extractPdfImages(file: File, baseName: string, settings: ConversionSettings) {
   const pdf = await loadPdf(file);
   const outputs: ConversionOutput[] = [];
+  const selectedPages = selectPdfPageNumbers(pdf.numPages, settings.pageOrder);
   try {
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    for (const pageNumber of selectedPages) {
       const page = await pdf.getPage(pageNumber);
       const found = await extractPageImageObjects(page, pageNumber, outputs);
       if (!found) {
@@ -308,8 +309,11 @@ async function extractPdfImages(file: File, baseName: string, settings: Conversi
   } finally {
     await pdf.cleanup();
   }
-  outputs.push(jsonOutput("manifest.json", { source: file.name, outputs: outputs.map((output) => output.name), note: "Embedded PDF image objects are extracted when exposed by PDF.js; page renders are included as fallbacks." }));
-  return zipOutputs(`${baseName}-pdf-assets.zip`, outputs);
+  if (settings.metadata !== "Assets only") {
+    outputs.push(jsonOutput("manifest.json", { source: file.name, selectedPages, outputs: outputs.map((output) => output.name), note: "Embedded PDF image objects are extracted when exposed by PDF.js; page renders are included as fallbacks." }));
+  }
+  const suffix = settings.batchNaming === "Clean filename" ? "" : "-pdf-assets";
+  return zipOutputs(`${baseName}${suffix}.zip`, outputs, zipLevelFromCompression(settings.bundle));
 }
 
 async function createSearchablePdf(file: File, baseName: string, settings: ConversionSettings) {
@@ -420,12 +424,19 @@ async function flattenPdfForCompression(file: File, baseName: string, settings: 
   return { name: `${baseName}${suffix}.pdf`, blob: new Blob([toArrayBuffer(bytes)], { type: "application/pdf" }) };
 }
 
-async function transcodeWithFfmpeg(file: File, baseName: string, extension: string, settings: ConversionSettings) {
+async function transcodeVideoToGif(file: File, inspection: FileInspection, baseName: string, settings: ConversionSettings) {
   const inputName = `input.${file.name.split(".").pop() || "bin"}`;
-  const outputName = `output.${extension}`;
-  const args = ffmpegArgs(inputName, outputName, extension, settings);
-  const blob = await runFfmpeg(file, inputName, outputName, args, mimeForExtension(extension));
-  return { name: `${baseName}.${extension}`, blob };
+  const outputName = "output.gif";
+  const sourceDuration = inspection.duration;
+  const range = sourceDuration ? resolveMediaTrimRange(settings, sourceDuration) : undefined;
+  const width = numberFromSetting(settings.resolution, 480);
+  const fps = Math.max(1, Math.min(15, numberFromSetting(settings.frameRate, 12)));
+  const trimArgs = range && (range.start > 0 || range.end < sourceDuration!)
+    ? ["-ss", range.start.toFixed(3), "-t", range.duration.toFixed(3)]
+    : [];
+  const filter = `fps=${fps},scale=${width}:-2:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=256[p];[s1][p]paletteuse=dither=sierra2_4a`;
+  const blob = await runFfmpeg(file, inputName, outputName, ["-i", inputName, ...trimArgs, "-vf", filter, "-loop", "0", outputName], "image/gif");
+  return { name: `${baseName}.gif`, blob };
 }
 
 async function spreadsheetRows(file: File) {
@@ -441,13 +452,14 @@ async function spreadsheetChartPack(file: File, baseName: string, settings: Conv
   const rows = await spreadsheetRows(file);
   const charts = createChartsFromRows(rows);
   const outputs: ConversionOutput[] = [];
+  const format = settings.outputFormat ?? "PNG + SVG";
   for (const chart of charts) {
     const svg = chartSvg(chart.title, chart.labels, chart.values);
-    outputs.push({ name: `charts/${chart.slug}.svg`, blob: new Blob([svg], { type: "image/svg+xml;charset=utf-8" }) });
-    if (!settings.outputFormat?.includes("SVG charts")) outputs.push({ name: `charts/${chart.slug}.png`, blob: await svgToPng(svg, 1200, 675) });
+    if (format !== "PNG only") outputs.push({ name: `charts/${chart.slug}.svg`, blob: new Blob([svg], { type: "image/svg+xml;charset=utf-8" }) });
+    if (format !== "SVG only") outputs.push({ name: `charts/${chart.slug}.png`, blob: await svgToPng(svg, 1200, 675) });
   }
-  outputs.push(jsonOutput("manifest.json", { source: file.name, charts: charts.map((chart) => chart.title) }));
-  return zipOutputs(`${baseName}-charts.zip`, outputs);
+  outputs.push(jsonOutput("manifest.json", { source: file.name, format, charts: charts.map((chart) => chart.title) }));
+  return zipOutputs(`${baseName}-charts.zip`, outputs, zipLevelFromCompression(settings.bundle));
 }
 
 async function fontWebPack(file: File, baseName: string) {
@@ -462,15 +474,13 @@ async function fontWebPack(file: File, baseName: string) {
 }
 
 async function fontSpecimen(file: File, baseName: string, settings: ConversionSettings) {
-  const fontUrl = URL.createObjectURL(file);
   const family = `Omni-${baseName}`;
+  const font = new FontFace(family, await file.arrayBuffer());
   try {
-    const font = new FontFace(family, `url(${fontUrl})`);
     await font.load();
     document.fonts.add(font);
     const canvas = textCardCanvas(baseName, "ABCDEFGHIJKLMNOPQRSTUVWXYZ\nabcdefghijklmnopqrstuvwxyz\n0123456789\nThe quick brown fox jumps over the lazy dog.", 1600, 1100, family);
     if (settings.outputFormat?.includes("PNG")) return { name: `${baseName}-specimen.png`, blob: await canvasToBlob(canvas, "image/png") };
-    if (settings.outputFormat?.includes("SVG")) return textOutput(`${baseName}-specimen.svg`, specimenSvg(baseName, family), "image/svg+xml;charset=utf-8");
     const { PDFDocument } = await import("pdf-lib");
     const pdf = await PDFDocument.create();
     const page = pdf.addPage([800, 550]);
@@ -478,7 +488,7 @@ async function fontSpecimen(file: File, baseName: string, settings: ConversionSe
     page.drawImage(image, { x: 0, y: 0, width: 800, height: 550 });
     return { name: `${baseName}-specimen.pdf`, blob: new Blob([toArrayBuffer(await pdf.save({ useObjectStreams: true }))], { type: "application/pdf" }) };
   } finally {
-    URL.revokeObjectURL(fontUrl);
+    document.fonts.delete(font);
   }
 }
 
@@ -581,16 +591,6 @@ async function transcodeBlobWithFfmpeg(blob: Blob, inputName: string, name: stri
   return { name, blob: await runFfmpeg(blob, inputName, args.at(-1) ?? name, args, mime) };
 }
 
-function ffmpegArgs(inputName: string, outputName: string, extension: string, settings: ConversionSettings) {
-  if (extension === "mp4") return ["-i", inputName, "-c:v", "libx264", "-preset", "slow", "-crf", crfFromCompression(settings.compression), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", audioBitrateFromCompression(settings.compression), "-movflags", "faststart", outputName];
-  if (extension === "webm") return ["-i", inputName, "-c:v", "libvpx-vp9", "-crf", crfFromCompression(settings.compression), "-b:v", "0", "-c:a", "libopus", "-b:a", audioBitrateFromCompression(settings.compression), outputName];
-  if (extension === "gif") return ["-i", inputName, "-vf", `fps=${Math.min(numberFromSetting(settings.frameRate, 12), 15)},scale=720:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse`, "-loop", "0", outputName];
-  if (extension === "mp3") return ["-i", inputName, "-vn", "-codec:a", "libmp3lame", "-b:a", audioBitrateFromCompression(settings.compression), outputName];
-  if (extension === "aac" || extension === "m4a") return ["-i", inputName, "-vn", "-c:a", "aac", "-b:a", audioBitrateFromCompression(settings.compression), outputName];
-  if (extension === "ogg") return ["-i", inputName, "-vn", "-c:a", "libopus", "-b:a", audioBitrateFromCompression(settings.compression), outputName];
-  return ["-i", inputName, outputName];
-}
-
 function textOutput(name: string, text: string, type: string): ConversionOutput {
   return { name, blob: new Blob([text], { type }) };
 }
@@ -618,15 +618,14 @@ function secondsFromSetting(value: string | undefined, fallback: number) {
 
 function scaleFromResolution(value?: string) {
   if (!value) return 1.5;
+  const dpi = Number(value.match(/([\d.]+)\s*DPI/i)?.[1]);
+  if (Number.isFinite(dpi) && dpi > 0) return dpi / 72;
   if (value.includes("512")) return 0.75;
   if (value.includes("1024")) return 1.25;
   if (value.includes("1080")) return 1.5;
   if (value.includes("1920")) return 2;
   if (value.includes("2K")) return 2.25;
   if (value.includes("4K")) return 4;
-  if (value.includes("150")) return 1.56;
-  if (value.includes("200")) return 2.08;
-  if (value.includes("300")) return 3.125;
   return 1.5;
 }
 
@@ -648,21 +647,6 @@ function aspectSize(value: string | undefined, fallback: "16:9" | "4:5") {
   if (selected.includes("9:16")) return { width: 9, height: 16 };
   if (selected.includes("4:3")) return { width: 4, height: 3 };
   return { width: 16, height: 9 };
-}
-
-function mimeForExtension(extension: string) {
-  return (
-    {
-      mp4: "video/mp4",
-      webm: "video/webm",
-      gif: "image/gif",
-      mp3: "audio/mpeg",
-      wav: "audio/wav",
-      aac: "audio/aac",
-      m4a: "audio/mp4",
-      ogg: "audio/ogg"
-    } as Record<string, string>
-  )[extension] ?? "application/octet-stream";
 }
 
 async function recordImageMotionWebm(file: File, duration: number, fps: number) {
@@ -722,16 +706,25 @@ function createChartsFromRows(rows: unknown[][]) {
   const body = rows.slice(1);
   const charts: Array<{ title: string; slug: string; labels: string[]; values: number[] }> = [];
   for (let column = 1; column < Math.min(headers.length, 5); column += 1) {
-    const values = body.map((row) => Number(row[column])).filter(Number.isFinite);
-    if (values.length < 2) continue;
+    const points = body
+      .map((row, index) => ({ label: String(row[0] || index + 1), value: numericChartValue(row[column]) }))
+      .filter((point): point is { label: string; value: number } => point.value != null);
+    if (points.length < 2) continue;
     charts.push({
       title: String(headers[column] || `Column ${column + 1}`),
       slug: baseFileName(String(headers[column] || `chart-${column + 1}`)),
-      labels: body.slice(0, values.length).map((row, index) => String(row[0] || index + 1)),
-      values
+      labels: points.map((point) => point.label),
+      values: points.map((point) => point.value)
     });
   }
   return charts.length ? charts : [{ title: "Row count", slug: "row-count", labels: ["Rows"], values: [Math.max(0, rows.length - 1)] }];
+}
+
+function numericChartValue(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function chartSvg(title: string, labels: string[], values: number[]) {
@@ -799,10 +792,6 @@ function wrapCanvasText(context: CanvasRenderingContext2D, text: string, x: numb
     }
   }
   if (line && currentY <= y + maxHeight) context.fillText(line, x, currentY);
-}
-
-function specimenSvg(name: string, family: string) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100"><rect width="100%" height="100%" fill="#0b0b0b"/><text x="80" y="160" fill="#fffaf0" font-size="96" font-family="${escapeHtml(family)}">${escapeHtml(name)}</text><text x="80" y="330" fill="#d7b76d" font-size="64" font-family="${escapeHtml(family)}">ABCDEFGHIJKLMNOPQRSTUVWXYZ</text><text x="80" y="460" fill="#d7b76d" font-size="64" font-family="${escapeHtml(family)}">abcdefghijklmnopqrstuvwxyz</text><text x="80" y="590" fill="#d7b76d" font-size="64" font-family="${escapeHtml(family)}">0123456789</text></svg>`;
 }
 
 function createPptxFiles(sourceName: string | undefined, slides: Array<{ title: string; body: string }>): ConversionOutput[] {

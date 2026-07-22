@@ -1,7 +1,7 @@
 import type { ConversionSettings, EditorControl } from "../lib/types";
 
 export interface VerifiedMediaRecipeContract {
-  recipeId: "audio-to-wav" | "audio-to-mp3" | "audio-to-flac" | "audio-to-m4a" | "audio-to-aac" | "audio-to-ogg" | "audio-to-opus" | "audio-to-webm" | "audio-to-mka" | "audio-to-mov" | "audio-to-m4r" | "audio-to-aiff" | "audio-to-alac" | "audio-to-caf" | "audio-to-ac3" | "audio-to-eac3" | "audio-to-vorbis" | "audio-to-wma" | "audio-to-wavpack" | "audio-to-tta" | "audio-to-mp2" | "audio-to-au" | "audio-to-wave64" | "audio-to-pcm" | "audio-to-3gp" | "audio-format-bundle" | "audio-waveform" | "audio-to-video" | "video-to-frames" | "video-thumbnail-sheet" | "video-to-mp4" | "video-to-webm" | "video-to-audio";
+  recipeId: "audio-to-wav" | "audio-to-mp3" | "audio-to-flac" | "audio-to-m4a" | "audio-to-aac" | "audio-to-ogg" | "audio-to-opus" | "audio-to-webm" | "audio-to-mka" | "audio-to-mov" | "audio-to-m4r" | "audio-to-aiff" | "audio-to-alac" | "audio-to-caf" | "audio-to-ac3" | "audio-to-eac3" | "audio-to-vorbis" | "audio-to-wma" | "audio-to-wavpack" | "audio-to-tta" | "audio-to-mp2" | "audio-to-au" | "audio-to-wave64" | "audio-to-pcm" | "audio-to-3gp" | "audio-format-bundle" | "audio-waveform" | "audio-to-video" | "video-to-frames" | "video-thumbnail-sheet" | "video-to-mp4" | "video-to-webm" | "video-to-gif" | "video-to-audio";
   fixture: "sine-wav" | "video-webm" | "video-mp4";
   engineId: "browser-media";
   expectedExtensions: readonly string[];
@@ -152,6 +152,11 @@ export const VERIFIED_MEDIA_RECIPE_CONTRACTS: readonly VerifiedMediaRecipeContra
     compression: "Balanced",
     metadata: "Keep tags",
     batchNaming: "Converted suffix"
+  }, "video-mp4"),
+  contract("video-to-gif", ["gif"], ["trim", "resolution", "frameRate"], {
+    trim: "First 1 second",
+    resolution: "360 px wide",
+    frameRate: "8 fps"
   }, "video-mp4"),
   contract("video-to-audio", ["wav"], ["outputFormat", "trim", "sampleRate", "audioChannels", "compression", "metadata", "batchNaming"], {
     outputFormat: "WAV",

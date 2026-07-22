@@ -244,6 +244,23 @@ test("waveform exports provide real SVG, PNG, peaks JSON, and compressed bundles
   expect(entries.every((entry) => entry.compressionMethod === 0)).toBe(true);
 });
 
+test("video to GIF emits a validated looping raster with selected width and frame rate", async ({ page }) => {
+  test.setTimeout(120_000);
+  const result = await page.evaluate(() => window.__omniMediaHarness.runMediaRecipe("video-to-gif", {
+    trim: "First 1 second",
+    resolution: "360 px wide",
+    frameRate: "8 fps"
+  }));
+  const output = result.outputs[0];
+  const dimensions = await page.evaluate((candidate) => window.__omniMediaHarness.inspectRaster(candidate.bytes, candidate.type), output);
+
+  expect(output.name).toBe("Video-Tone.gif");
+  expect(output.type).toBe("image/gif");
+  expect(output.bytes.slice(0, 6)).toEqual([71, 73, 70, 56, 57, 97]);
+  expect(output.validation).toMatchObject({ valid: true, detectedFormat: "gif" });
+  expect(dimensions).toEqual({ width: 360, height: 202 });
+});
+
 test("WAV conversion cooperatively cancels during active encoding", async ({ page }) => {
   const result = await page.evaluate(() => window.__omniMediaHarness.cancelWavConversion());
   expect(result.canceled).toBe(true);

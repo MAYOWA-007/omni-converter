@@ -2,7 +2,7 @@ import { expect, test } from "playwright/test";
 import { VERIFIED_MEDIA_RECIPE_CONTRACTS } from "../../src/data/verifiedMediaRecipes";
 
 test("every promoted media contract completes through its engine and central validator", async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(300_000);
   await page.goto("/omni-converter/tests/e2e/media-harness.html");
   await expect(page.locator("#status")).toHaveText("ready");
   for (const contract of VERIFIED_MEDIA_RECIPE_CONTRACTS) {

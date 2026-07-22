@@ -8,7 +8,7 @@ test("every verified browser PDF recipe has one executable fixture contract", ()
   const verified = verifiedRecipesForFamily("pdf", "browser").filter((recipe) => recipe.input.includes("pdf"));
   const contractIds = VERIFIED_PDF_RECIPE_CONTRACTS.map((contract) => contract.recipeId);
 
-  expect(contractIds).toHaveLength(15);
+  expect(contractIds).toHaveLength(16);
   expect(new Set(contractIds).size).toBe(contractIds.length);
   expect(contractIds).toEqual(verified.map((recipe) => recipe.id));
 
@@ -35,8 +35,8 @@ test("verified PDF controls are covered by settings-differential assertions", ()
   }
 });
 
-test("experimental OCR and image-object extraction remain unavailable", () => {
+test("experimental OCR remains unavailable while bounded image extraction is promoted", () => {
   const verifiedIds = new Set(verifiedRecipesForFamily("pdf", "browser").map((recipe) => recipe.id));
   expect(verifiedIds.has("pdf-ocr-searchable")).toBe(false);
-  expect(verifiedIds.has("pdf-extract-images")).toBe(false);
+  expect(verifiedIds.has("pdf-extract-images")).toBe(true);
 });

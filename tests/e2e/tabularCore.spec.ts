@@ -44,6 +44,41 @@ test("combined workbook JSON preserves sheet names and detected value types", as
   expect(value.sheets["Notes & QA"][0].note).toBe("comma, and\nline");
 });
 
+test("spreadsheet chart pack emits only selected formats with aligned labels and real ZIP levels", async ({ page }) => {
+  const [both] = await page.evaluate(() => window.__omniTabularHarness.runTabularRecipe("spreadsheet-chart-pack", {
+    outputFormat: "PNG + SVG",
+    bundle: "Balanced ZIP"
+  }));
+  const bothEntries = await page.evaluate((bytes) => window.__omniTabularHarness.unzip(bytes), both.bytes);
+  expect(both.name).toBe("Ledger-charts.zip");
+  expect(both.validation).toEqual({ valid: true, detectedFormat: "zip" });
+  expect(bothEntries.map((entry) => entry.name)).toEqual([
+    "charts/count.svg",
+    "charts/count.png",
+    "manifest.json"
+  ]);
+  expect(bothEntries.every((entry) => entry.compressionMethod === 8)).toBe(true);
+  expect(bothEntries[0].text).toContain(">Alpha<");
+  expect(bothEntries[0].text).toContain(">Zoë<");
+  expect(JSON.parse(bothEntries[2].text)).toMatchObject({ format: "PNG + SVG", charts: ["count"] });
+
+  const [svg] = await page.evaluate(() => window.__omniTabularHarness.runTabularRecipe("spreadsheet-chart-pack", {
+    outputFormat: "SVG only",
+    bundle: "Store ZIP"
+  }));
+  const svgEntries = await page.evaluate((bytes) => window.__omniTabularHarness.unzip(bytes), svg.bytes);
+  expect(svgEntries.map((entry) => entry.name)).toEqual(["charts/count.svg", "manifest.json"]);
+  expect(svgEntries.every((entry) => entry.compressionMethod === 0)).toBe(true);
+
+  const [png] = await page.evaluate(() => window.__omniTabularHarness.runTabularRecipe("spreadsheet-chart-pack", {
+    outputFormat: "PNG only",
+    bundle: "Maximum ZIP"
+  }));
+  const pngEntries = await page.evaluate((bytes) => window.__omniTabularHarness.unzip(bytes), png.bytes);
+  expect(pngEntries.map((entry) => entry.name)).toEqual(["charts/count.png", "manifest.json"]);
+  expect(pngEntries.every((entry) => entry.compressionMethod === 8)).toBe(true);
+});
+
 test("quoted CSV to JSON Lines infers unambiguous types and preserves leading zeros", async ({ page }) => {
   const [output] = await page.evaluate(() => window.__omniTabularHarness.runTabularRecipe("data-json-csv"));
   const records = output.text!.split("\n").map((line) => JSON.parse(line));

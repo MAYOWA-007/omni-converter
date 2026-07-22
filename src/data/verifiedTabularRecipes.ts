@@ -27,6 +27,14 @@ export const VERIFIED_TABULAR_RECIPE_CONTRACTS: readonly VerifiedTabularRecipeCo
     fixtureSettings: { outputFormat: "Combined workbook JSON", sheetSelection: "All sheets", headerMode: "First row is headers", dataTypes: "Preserve detected types", bundle: "Balanced ZIP with manifest" }
   },
   {
+    recipeId: "spreadsheet-chart-pack",
+    fixture: "multi-sheet-xlsx",
+    engineId: "legacy-advanced",
+    expectedExtensions: ["zip"],
+    differentialControls: ["outputFormat", "bundle"],
+    fixtureSettings: { outputFormat: "PNG + SVG", bundle: "Balanced ZIP" }
+  },
+  {
     recipeId: "data-json-csv",
     fixture: "quoted-csv",
     engineId: "legacy-advanced",

@@ -105,6 +105,43 @@ test("PDF page JPEG bundle uses true DPI, quality, and Store compression", async
   expect(entries[0].bytes.length).toBeLessThan(highEntries[0].bytes.length);
 });
 
+test("PDF image pack honors page selection, manifest, naming, resolution, and ZIP level", async ({ page }) => {
+  await page.goto("/omni-converter/tests/e2e/pdf-harness.html");
+  await expect(page.locator("#status")).toHaveText("ready");
+
+  const [output] = await page.evaluate(() => window.__omniPdfHarness.runPdfRecipe("pdf-extract-images", {
+    pageOrder: "Odd pages",
+    resolution: "96 DPI",
+    metadata: "Include manifest",
+    batchNaming: "Assets suffix",
+    bundle: "Balanced ZIP"
+  }));
+  const entries = await page.evaluate((bytes) => window.__omniPdfHarness.inspectZip(bytes), output.bytes);
+
+  expect(output.name).toBe("Quarterly-Plan-pdf-assets.zip");
+  expect(output.validation).toEqual({ valid: true, detectedFormat: "zip" });
+  expect(entries.map((entry) => entry.name)).toEqual([
+    "rendered-pages/Quarterly-Plan-page-001.png",
+    "rendered-pages/Quarterly-Plan-page-003.png",
+    "manifest.json"
+  ]);
+  expect(entries[0]).toMatchObject({ width: 400, height: 267, compressionMethod: 8 });
+  expect(entries[1]).toMatchObject({ width: 534, height: 320, compressionMethod: 8 });
+  expect(JSON.parse(entries[2].text!)).toMatchObject({ selectedPages: [1, 3] });
+
+  const [clean] = await page.evaluate(() => window.__omniPdfHarness.runPdfRecipe("pdf-extract-images", {
+    pageOrder: "First page",
+    resolution: "150 DPI",
+    metadata: "Assets only",
+    batchNaming: "Clean filename",
+    bundle: "Store ZIP"
+  }));
+  const cleanEntries = await page.evaluate((bytes) => window.__omniPdfHarness.inspectZip(bytes), clean.bytes);
+  expect(clean.name).toBe("Quarterly-Plan.zip");
+  expect(cleanEntries).toHaveLength(1);
+  expect(cleanEntries[0]).toMatchObject({ width: 625, height: 417, compressionMethod: 0 });
+});
+
 test("PDF split bundle contains only selected standalone pages", async ({ page }) => {
   await page.goto("/omni-converter/tests/e2e/pdf-harness.html");
   await expect(page.locator("#status")).toHaveText("ready");

@@ -71,12 +71,14 @@ test("every verified media recipe has one executable browser fixture contract", 
   }
 });
 
-test("unverified media transforms remain outside the promoted contract set", () => {
+test("video GIF export is promoted with a bounded local contract", () => {
   const verified = new Set(VERIFIED_MEDIA_RECIPE_CONTRACTS.map((contract) => contract.recipeId));
-  for (const id of ["video-to-gif"]) {
-    expect(verified.has(id as never)).toBe(false);
-    expect(CONVERSION_RECIPES.find((recipe) => recipe.id === id)?.runtimes).toEqual([]);
-  }
+  expect(verified.has("video-to-gif")).toBe(true);
+  expect(CONVERSION_RECIPES.find((recipe) => recipe.id === "video-to-gif")).toMatchObject({
+    inputFormats: ROUND_TRIP_VIDEO_FORMATS,
+    editorControls: ["trim", "resolution", "frameRate"],
+    runtimes: ["browser"]
+  });
 });
 
 test("a WAV upload exposes every locally executable audio container and derivative", () => {
@@ -121,7 +123,7 @@ test("every self-contained audio output can re-enter every verified audio path",
 test("every fixture-verified single-file video container enters every verified video path", () => {
   const videoRecipes = CONVERSION_RECIPES.filter((recipe) => recipe.maturity === "verified" && recipe.input.includes("video"));
 
-  expect(videoRecipes).toHaveLength(5);
+  expect(videoRecipes).toHaveLength(6);
   for (const recipe of videoRecipes) {
     expect(recipe.inputFormats, recipe.id).toEqual(expect.arrayContaining(ROUND_TRIP_VIDEO_FORMATS));
     expect(recipe.inputFormats, recipe.id).not.toContain("m3u8");

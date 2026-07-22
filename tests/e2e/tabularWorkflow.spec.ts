@@ -9,14 +9,14 @@ test("XLSX exposes verified table conversions plus universal tools and completes
     buffer: Buffer.from(createMultiSheetXlsxBytes())
   });
 
-  await expect(page.getByText("11 available conversions")).toBeVisible();
+  await expect(page.getByText("12 available conversions")).toBeVisible();
   await expect(page.getByText(/2 sheets/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Spreadsheet to CSV" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Spreadsheet to JSON" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /chart/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Spreadsheet to bar chart pack/i })).toBeVisible();
 
   await page.getByLabel("Search conversions").fill("all sheets csv");
-  await expect(page.getByText("1 of 11 conversions")).toBeVisible();
+  await expect(page.getByText("1 of 12 conversions")).toBeVisible();
   await page.getByRole("button", { name: "Spreadsheet to CSV" }).click();
   await expect(page.getByLabel("Sheets")).toHaveValue("All sheets");
   await expect(page.getByLabel("Sheets").locator("option")).toHaveText(["All sheets", "First sheet", "Sheet: Finance 2026", "Sheet: Notes & QA"]);
